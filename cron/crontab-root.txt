@@ -1,0 +1,1 @@
+0 7 * * * /home/ubuntu/viadigitech-monitoring-v4-enterprise-patched.sh
