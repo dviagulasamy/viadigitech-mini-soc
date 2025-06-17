@@ -1,5 +1,5 @@
 
-# ViaDigiTech Mini-SOC IA — V5.3
+# ViaDigiTech Mini-SOC IA — V5.3 (IA Ready Core Base)
 
 > Autonomous lightweight SOC monitoring system for VPS and cloud instances, integrating Fail2Ban, Geolocation, AI-based Risk Scoring, and Automated Daily Reporting.
 
