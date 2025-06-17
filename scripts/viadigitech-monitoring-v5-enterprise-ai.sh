@@ -2,17 +2,16 @@
 set -euo pipefail
 
 # ================================
-# ViaDigiTech SOC IA V5.3 – Shell
+# ViaDigiTech SOC IA V5.3 â€“ Shell
 # ================================
-WORKDIR="/home/ubuntu/viadigitech-soc-v5-3"
+WORKDIR="$(dirname "$0")"
 SCRIPT="$WORKDIR/viadigitech-monitoring-v5-ia-analyzer.py"
 
 MODE="${1:-production}"
 if [[ "$MODE" == "test" ]]; then
-  echo "MODE TEST ACTIVÉ : FORCING REPORT"
+  echo "MODE TEST ACTIVÃ‰ : FORCING REPORT"
 else
-  echo "MODE PRODUCTION ACTIVÉ"
+  echo "MODE PRODUCTION ACTIVÃ‰"
 fi
 
-# Lancement de l’analyse et envoi d’email intégrés au Python
 python3 "$SCRIPT" "$MODE"
