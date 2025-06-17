@@ -1,0 +1,1 @@
+0 7 * * * /home/ubuntu/viadigitech-soc-v5-3/viadigitech-monitoring-v5-enterprise-ai.sh
