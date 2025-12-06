@@ -121,6 +121,6 @@ html += "</table></body></html>"
 # Envoi email
 msg = MIMEMultipart('alternative')
 msg['Subject'] = f"ViaDigiTech SOC IA V5.3 Report [{TS}]"
-msg['From'], msg['To'] = "root@vps", EMAIL_TO
+msg['From'], msg['To'] = "monitoring@viadigitech.com", EMAIL_TO
 msg.attach(MIMEText(html, 'html', 'utf-8'))
 with smtplib.SMTP('localhost') as s: s.send_message(msg)

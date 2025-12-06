@@ -1,4 +1,13 @@
-*.pyc
-__pycache__/
+# Journaux et données générées
 logs/
-data/
+*.log
+*.csv
+*.html
+
+# Env Python
+venv/
+__pycache__/
+*.pyc
+
+# Secrets / configuration locale
+.env
