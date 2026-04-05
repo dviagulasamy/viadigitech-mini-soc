@@ -203,72 +203,120 @@ def mark_alerted(key):
 # ALERTE MAIL
 # ─────────────────────────────────────────
 
-def send_alert(alertes, sys_metrics, ssh_fails, top_ips, new_bans):
+def send_alert(alertes, sys_metrics, ssh_fails, top_ips, new_bans, actions=None):
     now = datetime.now()
     hostname = os.uname().nodename
+    actions = actions or []
 
+    # Couleur header selon gravité
+    has_critical = any(a["niveau"] == "CRITIQUE" for a in alertes)
+    header_bg    = "#7f1d1d" if has_critical else "#78350f"
+    header_border = "#ef4444" if has_critical else "#f59e0b"
+    header_color  = "#fca5a5" if has_critical else "#fde68a"
+    icon = "🚨" if has_critical else "⚠️"
+
+    # Lignes alertes
     rows = ""
     for a in alertes:
-        rows += f"<tr><td style='padding:8px;border:1px solid #ef4444;color:#ef4444;font-weight:bold'>{a['niveau']}</td><td style='padding:8px;border:1px solid #334155'>{a['message']}</td></tr>"
+        color = "#ef4444" if a["niveau"] == "CRITIQUE" else "#f59e0b"
+        rows += f"<tr><td style='padding:8px;border:1px solid #334155;color:{color};font-weight:bold;width:120px'>{a['niveau']}</td><td style='padding:8px;border:1px solid #334155'>{a['message']}</td></tr>"
 
+    # Section actions AbuseIPDB
+    actions_html = ""
+    if actions:
+        action_rows = ""
+        for a in actions:
+            info = a.get("info", {})
+            if a["action"] == "BAN_AUTO":
+                badge = "<span style='background:#dc2626;color:#fff;padding:2px 8px;border-radius:4px;font-size:11px'>BAN AUTO</span>"
+            elif a["action"] == "DRYRUN_BAN":
+                badge = "<span style='background:#d97706;color:#fff;padding:2px 8px;border-radius:4px;font-size:11px'>DRY-RUN</span>"
+            else:
+                badge = "<span style='background:#334155;color:#94a3b8;padding:2px 8px;border-radius:4px;font-size:11px'>SURVEILLE</span>"
+            tor = " 🧅 TOR" if info.get("isTor") else ""
+            action_rows += f"""<tr>
+              <td style='padding:7px;border:1px solid #334155;font-family:monospace;font-size:12px'>{a['ip']}</td>
+              <td style='padding:7px;border:1px solid #334155;text-align:center'><b style='color:#f87171'>{a['score']}%</b></td>
+              <td style='padding:7px;border:1px solid #334155;font-size:12px'>{info.get('country','?')} — {info.get('isp','?')}{tor}</td>
+              <td style='padding:7px;border:1px solid #334155'>{badge}</td>
+            </tr>"""
+        actions_html = f"""<div class="card">
+  <div style="font-weight:bold;color:#a5b4fc;margin-bottom:10px">🔍 Analyse AbuseIPDB</div>
+  <table><thead><tr><th>IP</th><th>Score</th><th>Origine</th><th>Action</th></tr></thead>
+  <tbody>{action_rows}</tbody></table>
+</div>"""
+
+    # Top IPs
     top_ip_rows = ""
     for ip, count in top_ips.most_common(5):
-        top_ip_rows += f"<tr><td style='padding:6px;border:1px solid #334155'>{ip}</td><td style='padding:6px;border:1px solid #334155;text-align:right'>{count}</td></tr>"
+        top_ip_rows += f"<tr><td style='padding:6px;border:1px solid #334155;font-family:monospace;font-size:12px'>{ip}</td><td style='padding:6px;border:1px solid #334155;text-align:right'>{count}</td></tr>"
 
-    bans_str = ", ".join(new_bans[:10]) if new_bans else "Aucun"
+    bans_str = " &nbsp;·&nbsp; ".join(new_bans[:10]) if new_bans else "Aucun"
+
+    # Audit récent
+    audit_rows = ""
+    if os.path.exists(AUDIT_LOG):
+        with open(AUDIT_LOG) as f:
+            lines = f.readlines()[-6:]
+        for line in lines[1:]:  # skip header
+            parts = line.strip().split(",", 4)
+            if len(parts) >= 4:
+                ts = parts[0][11:16]  # HH:MM
+                audit_rows += f"<tr><td style='padding:5px;border:1px solid #1e2035;color:#64748b;font-size:11px'>{ts}</td><td style='padding:5px;border:1px solid #1e2035;font-family:monospace;font-size:11px'>{parts[1]}</td><td style='padding:5px;border:1px solid #1e2035;font-size:11px'>{parts[2]}</td><td style='padding:5px;border:1px solid #1e2035;font-size:11px'>{parts[3]}%</td></tr>"
 
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <style>
-  body {{ font-family: sans-serif; background: #0f1117; color: #e2e8f0; margin: 0; padding: 20px; }}
-  .card {{ background: #1a1f2e; border: 1px solid #2d3154; border-radius: 10px; padding: 20px; margin-bottom: 16px; }}
-  table {{ border-collapse: collapse; width: 100%; }}
-  th {{ background: #1e2035; padding: 8px; border: 1px solid #334155; text-align: left; color: #a5b4fc; }}
+  body {{ font-family: -apple-system, sans-serif; background: #0f1117; color: #e2e8f0; margin: 0; padding: 16px; }}
+  .card {{ background: #1a1f2e; border: 1px solid #2d3154; border-radius: 10px; padding: 18px; margin-bottom: 14px; }}
+  table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
+  th {{ background: #1e2035; padding: 8px; border: 1px solid #334155; text-align: left; color: #a5b4fc; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }}
 </style>
 </head><body>
-<div style="max-width:640px;margin:auto">
+<div style="max-width:660px;margin:auto">
 
-<div style="background:#7f1d1d;border:2px solid #ef4444;border-radius:10px;padding:16px;margin-bottom:16px">
-  <div style="font-size:18px;font-weight:bold;color:#fca5a5">🚨 ALERTE SOC — {hostname}</div>
-  <div style="color:#fca5a5;font-size:13px">{now.strftime('%d/%m/%Y %H:%M:%S')} — {len(alertes)} alerte(s) détectée(s)</div>
+<div style="background:{header_bg};border:2px solid {header_border};border-radius:10px;padding:16px;margin-bottom:14px">
+  <div style="font-size:17px;font-weight:bold;color:{header_color}">{icon} ALERTE SOC — {hostname}</div>
+  <div style="color:{header_color};font-size:12px;margin-top:4px;opacity:.85">{now.strftime('%d/%m/%Y %H:%M:%S')} &nbsp;·&nbsp; {len(alertes)} alerte(s) &nbsp;·&nbsp; mode <b>{"AUTO-BAN" if AUTO_BAN_MODE == "auto" else "DRY-RUN"}</b></div>
 </div>
 
 <div class="card">
-  <div style="font-weight:bold;color:#a5b4fc;margin-bottom:10px">Alertes actives</div>
-  <table><thead><tr><th>Niveau</th><th>Détail</th></tr></thead>
+  <div style="font-weight:bold;color:#a5b4fc;margin-bottom:10px">Alertes</div>
+  <table><thead><tr><th style="width:110px">Niveau</th><th>Détail</th></tr></thead>
   <tbody>{rows}</tbody></table>
 </div>
 
+{actions_html}
+
 <div class="card">
   <div style="font-weight:bold;color:#a5b4fc;margin-bottom:10px">Métriques système</div>
-  <table><thead><tr><th>Indicateur</th><th>Valeur</th><th>Seuil</th></tr></thead>
+  <table><thead><tr><th>Indicateur</th><th>Valeur</th><th>Seuil</th><th>Statut</th></tr></thead>
   <tbody>
-    <tr><td style='padding:6px;border:1px solid #334155'>CPU</td><td style='padding:6px;border:1px solid #334155'>{sys_metrics['cpu']:.1f}%</td><td style='padding:6px;border:1px solid #334155'>{SEUILS['cpu_percent']}%</td></tr>
-    <tr><td style='padding:6px;border:1px solid #334155'>RAM</td><td style='padding:6px;border:1px solid #334155'>{sys_metrics['ram']:.1f}%</td><td style='padding:6px;border:1px solid #334155'>{SEUILS['ram_percent']}%</td></tr>
-    <tr><td style='padding:6px;border:1px solid #334155'>Disque</td><td style='padding:6px;border:1px solid #334155'>{sys_metrics['disk']:.1f}%</td><td style='padding:6px;border:1px solid #334155'>{SEUILS['disk_percent']}%</td></tr>
-    <tr><td style='padding:6px;border:1px solid #334155'>SSH échecs (15min)</td><td style='padding:6px;border:1px solid #334155'>{ssh_fails}</td><td style='padding:6px;border:1px solid #334155'>{SEUILS['ssh_fails']}</td></tr>
-    <tr><td style='padding:6px;border:1px solid #334155'>Nouveaux bans (15min)</td><td style='padding:6px;border:1px solid #334155'>{len(new_bans)}</td><td style='padding:6px;border:1px solid #334155'>{SEUILS['new_bans']}</td></tr>
+    <tr><td style='padding:6px;border:1px solid #334155'>CPU</td><td style='padding:6px;border:1px solid #334155'>{sys_metrics['cpu']:.1f}%</td><td style='padding:6px;border:1px solid #334155'>{SEUILS['cpu_percent']}%</td><td style='padding:6px;border:1px solid #334155;color:{"#ef4444" if sys_metrics["cpu"] >= SEUILS["cpu_percent"] else "#22c55e"}'>{"⚠ Critique" if sys_metrics["cpu"] >= SEUILS["cpu_percent"] else "✓ Normal"}</td></tr>
+    <tr><td style='padding:6px;border:1px solid #334155'>RAM</td><td style='padding:6px;border:1px solid #334155'>{sys_metrics['ram']:.1f}%</td><td style='padding:6px;border:1px solid #334155'>{SEUILS['ram_percent']}%</td><td style='padding:6px;border:1px solid #334155;color:{"#ef4444" if sys_metrics["ram"] >= SEUILS["ram_percent"] else "#22c55e"}'>{"⚠ Critique" if sys_metrics["ram"] >= SEUILS["ram_percent"] else "✓ Normal"}</td></tr>
+    <tr><td style='padding:6px;border:1px solid #334155'>Disque</td><td style='padding:6px;border:1px solid #334155'>{sys_metrics['disk']:.1f}%</td><td style='padding:6px;border:1px solid #334155'>{SEUILS['disk_percent']}%</td><td style='padding:6px;border:1px solid #334155;color:{"#ef4444" if sys_metrics["disk"] >= SEUILS["disk_percent"] else "#22c55e"}'>{"⚠ Critique" if sys_metrics["disk"] >= SEUILS["disk_percent"] else "✓ Normal"}</td></tr>
+    <tr><td style='padding:6px;border:1px solid #334155'>SSH échecs (15min)</td><td style='padding:6px;border:1px solid #334155'>{ssh_fails}</td><td style='padding:6px;border:1px solid #334155'>{SEUILS["ssh_fails"]}</td><td style='padding:6px;border:1px solid #334155;color:{"#ef4444" if ssh_fails >= SEUILS["ssh_fails"] else "#22c55e"}'>{"⚠ Critique" if ssh_fails >= SEUILS["ssh_fails"] else "✓ Normal"}</td></tr>
+    <tr><td style='padding:6px;border:1px solid #334155'>Nouveaux bans (15min)</td><td style='padding:6px;border:1px solid #334155'>{len(new_bans)}</td><td style='padding:6px;border:1px solid #334155'>{SEUILS["new_bans"]}</td><td style='padding:6px;border:1px solid #334155;color:{"#ef4444" if len(new_bans) >= SEUILS["new_bans"] else "#22c55e"}'>{"⚠ Critique" if len(new_bans) >= SEUILS["new_bans"] else "✓ Normal"}</td></tr>
   </tbody></table>
 </div>
 
-{"" if not top_ips else f'''<div class="card">
-  <div style="font-weight:bold;color:#a5b4fc;margin-bottom:10px">Top IPs attaquantes (15min)</div>
-  <table><thead><tr><th>IP</th><th style="text-align:right">Tentatives</th></tr></thead>
-  <tbody>{top_ip_rows}</tbody></table>
-</div>'''}
+{"" if not top_ips else f'<div class="card"><div style="font-weight:bold;color:#a5b4fc;margin-bottom:10px">Top IPs attaquantes (15min)</div><table><thead><tr><th>IP</th><th style="text-align:right">Tentatives</th></tr></thead><tbody>' + top_ip_rows + '</tbody></table></div>'}
 
-<div class="card">
-  <div style="font-weight:bold;color:#a5b4fc;margin-bottom:6px">Nouveaux bans Fail2Ban</div>
-  <div style="font-size:13px;color:#94a3b8">{bans_str}</div>
+{"" if not new_bans else f'<div class="card"><div style="font-weight:bold;color:#a5b4fc;margin-bottom:6px">Nouveaux bans Fail2Ban (15min)</div><div style="font-size:12px;color:#94a3b8;font-family:monospace;line-height:1.8">{bans_str}</div></div>'}
+
+{("" if not audit_rows else '<div class="card"><div style="font-weight:bold;color:#a5b4fc;margin-bottom:8px">Journal audit (dernières actions)</div><table><thead><tr><th>Heure</th><th>IP</th><th>Action</th><th>Score</th></tr></thead><tbody>' + audit_rows + '</tbody></table></div>')}
+
+<div style="text-align:center;font-size:11px;color:#334155;margin-top:6px;padding-top:10px;border-top:1px solid #1e2035">
+  ViaDigiTech AI SecOps · {hostname} · détecteur 15min · AbuseIPDB enrichi
 </div>
 
-<div style="text-align:center;font-size:11px;color:#334155;margin-top:8px">
-  AI SecOps · {hostname} · détecteur 15min
-</div>
 </div></body></html>"""
 
+    # Sujet adapté au contenu
+    bans_auto = sum(1 for a in actions if a["action"] == "BAN_AUTO")
+    subject_detail = f"{bans_auto} IP(s) bannies" if bans_auto else f"{len(alertes)} événement(s)"
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"🚨 SOC ALERTE — {len(alertes)} événement(s) sur {hostname}"
+    msg["Subject"] = f"{icon} SOC {hostname} — {subject_detail}"
     msg["From"]    = MAIL_FROM
     msg["To"]      = ", ".join(MAIL_TO)
     msg.attach(MIMEText(html, "html", "utf-8"))
@@ -326,7 +374,7 @@ def main():
 
     if alertes:
         print(f"[{now:%H:%M:%S}] {len(alertes)} alerte(s) → envoi mail...")
-        send_alert(alertes, sys_metrics, ssh_fails, top_ips, new_bans)
+        send_alert(alertes, sys_metrics, ssh_fails, top_ips, new_bans, actions)
         print(f"[{now:%H:%M:%S}] Alerte envoyée à {MAIL_TO}")
     else:
         print(f"[{now:%H:%M:%S}] Aucune alerte. CPU:{sys_metrics['cpu']:.1f}% RAM:{sys_metrics['ram']:.1f}% Disk:{sys_metrics['disk']:.1f}% SSH:{ssh_fails} Bans:{len(new_bans)}")
