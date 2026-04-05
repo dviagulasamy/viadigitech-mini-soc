@@ -8,6 +8,7 @@ import os
 import re
 import json
 import smtplib
+
 import subprocess
 import psutil
 import requests
@@ -146,8 +147,40 @@ def write_audit(ip, action, score, reason):
             f.write("timestamp,ip,action,score,reason\n")
         f.write(f"{datetime.now().isoformat()},{ip},{action},{score},{reason}\n")
 
+def ollama_decide(ip, attempts, info):
+    """
+    Interroge qwen2.5:3b pour une décision sur une IP en zone grise (score 40-79%).
+    Retourne {"action": "BAN"|"SURVEILLE"|"IGNORE", "raison": "...", "urgence": "..."}
+    """
+    prompt = (
+        f"Tu es un analyste SOC. Réponds UNIQUEMENT en JSON valide, sans texte autour.\n"
+        f"Contexte:\n"
+        f"- IP: {ip}\n"
+        f"- Tentatives SSH en 15min: {attempts}\n"
+        f"- Score AbuseIPDB: {info['score']}%\n"
+        f"- Pays: {info['country']}, FAI: {info['isp']}\n"
+        f"- Nœud TOR: {info['isTor']}\n"
+        f"- Signalements totaux: {info['reports']}\n"
+        f"Format: {{\"action\": \"BAN\" ou \"SURVEILLE\" ou \"IGNORE\", "
+        f"\"raison\": \"une phrase\", \"urgence\": \"haute\" ou \"moyenne\" ou \"faible\"}}"
+    )
+    try:
+        r = requests.post(
+            "http://localhost:11434/api/generate",
+            json={"model": "qwen2.5:3b", "prompt": prompt, "stream": False},
+            timeout=60
+        )
+        response = r.json().get("response", "").strip()
+        # Extraire le JSON même si du texte parasite l'entoure
+        start, end = response.find("{"), response.rfind("}") + 1
+        if start >= 0 and end > start:
+            return json.loads(response[start:end])
+    except Exception as e:
+        print(f"[Ollama] Erreur pour {ip}: {e}")
+    return {"action": "SURVEILLE", "raison": "Décision Ollama indisponible", "urgence": "faible"}
+
 def enrich_and_act(top_ips):
-    """Vérifie les top IPs sur AbuseIPDB et agit selon le mode."""
+    """Vérifie les top IPs sur AbuseIPDB et agit selon le mode + Ollama pour zone grise."""
     actions = []
     for ip, attempts in top_ips.most_common(5):
         info = check_abuseipdb(ip)
@@ -155,19 +188,44 @@ def enrich_and_act(top_ips):
             continue
         score = info["score"]
         reason = f"{attempts} tentatives, score {score}%, {info['country']}, {info['isp']}"
+
         if score >= AUTO_BAN_SCORE:
+            # Score élevé → ban direct
             if AUTO_BAN_MODE == "auto":
                 success = ban_ip_fail2ban(ip)
                 action = "BAN_AUTO" if success else "BAN_ECHEC"
-                write_audit(ip, action, score, reason)
-                actions.append({"ip": ip, "action": action, "score": score, "info": info, "reason": reason})
-                print(f"[AutoBan] {ip} — score {score}% → {action}")
-            else:  # dryrun
-                write_audit(ip, "DRYRUN_BAN", score, reason)
-                actions.append({"ip": ip, "action": "DRYRUN_BAN", "score": score, "info": info, "reason": reason})
-                print(f"[DryRun] {ip} — score {score}% → ban recommandé (mode dryrun)")
+            else:
+                action = "DRYRUN_BAN"
+            write_audit(ip, action, score, reason)
+            actions.append({"ip": ip, "action": action, "score": score, "info": info, "reason": reason})
+            print(f"[{'AutoBan' if AUTO_BAN_MODE == 'auto' else 'DryRun'}] {ip} — score {score}% → {action}")
+
+        elif score >= 40:
+            # Zone grise → Ollama décide
+            print(f"[Ollama] Zone grise {ip} (score {score}%) — consultation qwen2.5:3b...")
+            decision = ollama_decide(ip, attempts, info)
+            ollama_action = decision.get("action", "SURVEILLE")
+            ollama_raison = decision.get("raison", "")
+            ollama_urgence = decision.get("urgence", "faible")
+            reason_full = f"{reason} | Ollama: {ollama_raison} (urgence: {ollama_urgence})"
+
+            if ollama_action == "BAN" and AUTO_BAN_MODE == "auto":
+                success = ban_ip_fail2ban(ip)
+                action = f"BAN_OLLAMA" if success else "BAN_ECHEC"
+            else:
+                action = f"OLLAMA_{ollama_action}"
+
+            write_audit(ip, action, score, reason_full)
+            actions.append({
+                "ip": ip, "action": action, "score": score,
+                "info": info, "reason": reason_full,
+                "ollama": decision
+            })
+            print(f"[Ollama] {ip} → {action} ({ollama_raison})")
+
         else:
             actions.append({"ip": ip, "action": "SURVEILLE", "score": score, "info": info, "reason": reason})
+
     return actions
 
 # ─────────────────────────────────────────
