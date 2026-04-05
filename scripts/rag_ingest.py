@@ -26,6 +26,49 @@ def api(method, path, **kwargs):
     )
     return r.json()
 
+def chat(message):
+    """
+    RAG manuel : récupère le contexte depuis AnythingLLM puis interroge Ollama directement.
+    Contourne les timeouts Node.js internes d'AnythingLLM.
+    """
+    # Récupérer les documents du workspace comme contexte
+    r = requests.get(
+        f"{ANYTHINGLLM_URL}/api/v1/workspace/{WORKSPACE_SLUG}",
+        headers={"Authorization": f"Bearer {ANYTHINGLLM_KEY}"},
+        timeout=15
+    )
+    docs = r.json().get("workspace", [{}])[0].get("documents", [])
+    context_parts = []
+    for doc in docs[:5]:  # top 5 docs
+        metadata = doc.get("metadata", "{}")
+        try:
+            meta = json.loads(metadata) if isinstance(metadata, str) else metadata
+            title = meta.get("title", doc.get("filename", ""))
+        except:
+            title = doc.get("filename", "")
+        if title:
+            context_parts.append(f"[{title}]")
+
+    # Contexte réduit — 10 lignes max pour rester rapide sur CPU
+    context = ""
+    if os.path.exists(AUDIT_LOG):
+        with open(AUDIT_LOG) as f:
+            lines = f.readlines()[-10:]
+        context += "Audit:\n" + "".join(lines)
+    if os.path.exists(DETECTOR_LOG):
+        with open(DETECTOR_LOG) as f:
+            lines = f.readlines()[-5:]
+        context += "\nDetecteur:\n" + "".join(lines)
+
+    prompt = f"SOC ViaDigiTech. Réponds en 3 phrases max en français.\n{context}\nQuestion: {message}"
+
+    r = requests.post(
+        "http://localhost:11434/api/generate",
+        json={"model": "llama3.2:3b", "prompt": prompt, "stream": False},
+        timeout=180
+    )
+    return r.json().get("response", "").strip()
+
 def html_to_text(html):
     """Convertit HTML en texte brut pour l'ingestion RAG."""
     text = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL)
