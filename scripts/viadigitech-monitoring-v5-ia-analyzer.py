@@ -15,7 +15,7 @@ HISTORY_CSV = f"{LOGDIR}/banned-history.csv"
 FAIL2BAN_LOG = "/var/log/fail2ban.log"
 AUTH_LOG = "/var/log/auth.log"
 IMGDIR = "/var/www/html/viadigitech-reports"
-EMAIL_TO = "david@viadigitech.com"
+EMAIL_TO = os.environ.get("SOC_MAIL_TO", "admin@example.com")
 
 NOW = datetime.now()
 CUTOFF = NOW - timedelta(hours=24)

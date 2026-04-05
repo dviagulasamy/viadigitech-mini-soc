@@ -56,4 +56,4 @@ EOF
 echo "$MESSAGE"
 
 # Envoi email
-echo "$MESSAGE" | mail -s "Rapport ViaDigiTech [$HOSTNAME]" david@viadigitech.com
+echo "$MESSAGE" | mail -s "Rapport ViaDigiTech [$HOSTNAME]" "${SOC_MAIL_TO:-admin@example.com}"

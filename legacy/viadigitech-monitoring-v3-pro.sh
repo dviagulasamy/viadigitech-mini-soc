@@ -78,4 +78,4 @@ EOF
 echo "$MESSAGE" >> $LOGDIR/daily-report-$(date '+%Y-%m-%d').log
 
 # Envoi du rapport par mail
-echo "$MESSAGE" | mail -s "ViaDigiTech VPS Monitoring [$HOSTNAME]" david@viadigitech.com
+echo "$MESSAGE" | mail -s "ViaDigiTech VPS Monitoring [$HOSTNAME]" "${SOC_MAIL_TO:-admin@example.com}"
