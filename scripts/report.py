@@ -23,11 +23,11 @@ import requests
 # ─────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────
-MAIL_FROM     = os.environ.get("SOC_MAIL_FROM", "secops@localhost")
-MAIL_TO       = os.environ.get("SOC_MAIL_TO", "admin@example.com").split(",")
+MAIL_FROM     = "secops@vps-23de4a3d.vps.ovh.net"
+MAIL_TO       = ["david@viadigitech.com"]
 MAIL_SUBJECT  = "🛡️ AI SecOps — Rapport du {date}"
 OLLAMA_URL    = "http://localhost:11434/api/generate"
-OLLAMA_MODEL  = "llama3.2:3b"
+OLLAMA_MODEL  = "qwen2.5:3b"
 OLLAMA_TIMEOUT = 300          # 5 min max pour le prompt long
 AUTH_LOG      = "/var/log/auth.log"
 IMGDIR        = "/var/www/html/viadigitech-reports"
