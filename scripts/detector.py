@@ -41,7 +41,7 @@ SEUILS = {
 }
 
 # Whitelist IP — jamais alertées
-WHITELIST = []
+WHITELIST = ["176.134.132.129"]
 
 # ─────────────────────────────────────────
 # COLLECTE
