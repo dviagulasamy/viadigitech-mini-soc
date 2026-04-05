@@ -118,9 +118,10 @@ for ip, count, country, region, city in geo_rows:
     html += f"<tr><td>{ip}</td><td>{count}</td><td>{country}</td><td>{region}</td><td>{city}</td></tr>"
 html += "</table></body></html>"
 
-# Envoi email
-msg = MIMEMultipart('alternative')
-msg['Subject'] = f"ViaDigiTech SOC IA V5.3 Report [{TS}]"
-msg['From'], msg['To'] = "monitoring@viadigitech.com", EMAIL_TO
-msg.attach(MIMEText(html, 'html', 'utf-8'))
-with smtplib.SMTP('localhost') as s: s.send_message(msg)
+# Envoi email désactivé — rapport consolidé envoyé par report.py
+# msg = MIMEMultipart('alternative')
+# msg['Subject'] = f"ViaDigiTech SOC IA V5.3 Report [{TS}]"
+# msg['From'], msg['To'] = "monitoring@viadigitech.com", EMAIL_TO
+# msg.attach(MIMEText(html, 'html', 'utf-8'))
+# with smtplib.SMTP('localhost') as s: s.send_message(msg)
+print(f"[{TS}] Analyse SOC V5.3 terminée — données sauvegardées dans {HISTORY_CSV}")
