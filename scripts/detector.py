@@ -28,7 +28,7 @@ AUDIT_LOG        = "/home/ubuntu/secops/audit_actions.csv"
 WINDOW_MIN       = 15   # fenêtre d'analyse en minutes
 
 # Mode : "dryrun" = mail de confirmation, "auto" = ban immédiat
-AUTO_BAN_MODE    = "dryrun"
+AUTO_BAN_MODE    = "auto"
 AUTO_BAN_SCORE   = 80    # score AbuseIPDB minimum pour ban auto
 
 # Seuils d'alerte
@@ -129,7 +129,7 @@ def ban_ip_fail2ban(ip, jail="sshd"):
     """Bannit une IP via fail2ban-client."""
     try:
         result = subprocess.run(
-            ["fail2ban-client", "set", jail, "banip", ip],
+            ["sudo", "fail2ban-client", "set", jail, "banip", ip],
             capture_output=True, text=True, timeout=10
         )
         return result.returncode == 0
