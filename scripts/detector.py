@@ -6,8 +6,11 @@ Vérifie les seuils critiques et envoie un mail d'alerte si dépassement.
 
 import os
 import re
+import json
 import smtplib
+import subprocess
 import psutil
+import requests
 from datetime import datetime, timedelta
 from collections import Counter
 from email.mime.multipart import MIMEMultipart
@@ -16,11 +19,17 @@ from email.mime.text import MIMEText
 # ─────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────
-MAIL_FROM   = os.environ.get("SOC_MAIL_FROM", "secops@localhost")
-MAIL_TO     = os.environ.get("SOC_MAIL_TO", "admin@example.com").split(",")
-AUTH_LOG    = "/var/log/auth.log"
-STATE_FILE  = "/tmp/soc_detector_state.txt"
-WINDOW_MIN  = 15   # fenêtre d'analyse en minutes
+MAIL_FROM        = os.environ.get("SOC_MAIL_FROM", "secops@localhost")
+MAIL_TO          = os.environ.get("SOC_MAIL_TO", "admin@example.com").split(",")
+ABUSEIPDB_KEY    = os.environ.get("ABUSEIPDB_KEY", "")
+AUTH_LOG         = "/var/log/auth.log"
+STATE_FILE       = "/tmp/soc_detector_state.txt"
+AUDIT_LOG        = "/home/ubuntu/secops/audit_actions.csv"
+WINDOW_MIN       = 15   # fenêtre d'analyse en minutes
+
+# Mode : "dryrun" = mail de confirmation, "auto" = ban immédiat
+AUTO_BAN_MODE    = "dryrun"
+AUTO_BAN_SCORE   = 80    # score AbuseIPDB minimum pour ban auto
 
 # Seuils d'alerte
 SEUILS = {
@@ -88,6 +97,78 @@ def get_new_bans(since_minutes):
             if m and m.group(1) not in WHITELIST:
                 bans.append(m.group(1))
     return bans
+
+# ─────────────────────────────────────────
+# ABUSEIPDB — vérification et ban automatique
+# ─────────────────────────────────────────
+
+def check_abuseipdb(ip):
+    """Retourne le score AbuseIPDB (0-100) et les infos de l'IP."""
+    if not ABUSEIPDB_KEY:
+        return None
+    try:
+        r = requests.get(
+            "https://api.abuseipdb.com/api/v2/check",
+            params={"ipAddress": ip, "maxAgeInDays": 30},
+            headers={"Key": ABUSEIPDB_KEY, "Accept": "application/json"},
+            timeout=10
+        )
+        data = r.json().get("data", {})
+        return {
+            "score":    data.get("abuseConfidenceScore", 0),
+            "country":  data.get("countryCode", ""),
+            "isp":      data.get("isp", ""),
+            "isTor":    data.get("isTor", False),
+            "reports":  data.get("totalReports", 0),
+        }
+    except Exception as e:
+        print(f"[AbuseIPDB] Erreur pour {ip}: {e}")
+        return None
+
+def ban_ip_fail2ban(ip, jail="sshd"):
+    """Bannit une IP via fail2ban-client."""
+    try:
+        result = subprocess.run(
+            ["fail2ban-client", "set", jail, "banip", ip],
+            capture_output=True, text=True, timeout=10
+        )
+        return result.returncode == 0
+    except Exception as e:
+        print(f"[Ban] Erreur: {e}")
+        return False
+
+def write_audit(ip, action, score, reason):
+    """Enregistre l'action dans le log d'audit CSV."""
+    os.makedirs(os.path.dirname(AUDIT_LOG), exist_ok=True)
+    header = not os.path.exists(AUDIT_LOG)
+    with open(AUDIT_LOG, "a") as f:
+        if header:
+            f.write("timestamp,ip,action,score,reason\n")
+        f.write(f"{datetime.now().isoformat()},{ip},{action},{score},{reason}\n")
+
+def enrich_and_act(top_ips):
+    """Vérifie les top IPs sur AbuseIPDB et agit selon le mode."""
+    actions = []
+    for ip, attempts in top_ips.most_common(5):
+        info = check_abuseipdb(ip)
+        if not info:
+            continue
+        score = info["score"]
+        reason = f"{attempts} tentatives, score {score}%, {info['country']}, {info['isp']}"
+        if score >= AUTO_BAN_SCORE:
+            if AUTO_BAN_MODE == "auto":
+                success = ban_ip_fail2ban(ip)
+                action = "BAN_AUTO" if success else "BAN_ECHEC"
+                write_audit(ip, action, score, reason)
+                actions.append({"ip": ip, "action": action, "score": score, "info": info, "reason": reason})
+                print(f"[AutoBan] {ip} — score {score}% → {action}")
+            else:  # dryrun
+                write_audit(ip, "DRYRUN_BAN", score, reason)
+                actions.append({"ip": ip, "action": "DRYRUN_BAN", "score": score, "info": info, "reason": reason})
+                print(f"[DryRun] {ip} — score {score}% → ban recommandé (mode dryrun)")
+        else:
+            actions.append({"ip": ip, "action": "SURVEILLE", "score": score, "info": info, "reason": reason})
+    return actions
 
 # ─────────────────────────────────────────
 # DÉDUPLICATION — évite les alertes répétitives
@@ -227,6 +308,21 @@ def main():
     if sys_metrics["disk"] >= SEUILS["disk_percent"] and not already_alerted("disk"):
         alertes.append({"niveau": "CRITIQUE", "message": f"Disque à {sys_metrics['disk']:.1f}% — intervention requise"})
         mark_alerted("disk")
+
+    # Enrichissement AbuseIPDB sur les top IPs attaquantes
+    actions = []
+    if top_ips and ABUSEIPDB_KEY:
+        print(f"[{now:%H:%M:%S}] Vérification AbuseIPDB ({len(top_ips)} IPs)...")
+        actions = enrich_and_act(top_ips)
+        bans_auto = [a for a in actions if a["action"] in ("BAN_AUTO", "DRYRUN_BAN")]
+        if bans_auto:
+            for a in bans_auto:
+                niveau = "CRITIQUE" if a["action"] == "BAN_AUTO" else "AVERTISSEMENT"
+                label = "Banni automatiquement" if a["action"] == "BAN_AUTO" else "Ban recommandé (dry-run)"
+                alertes.append({
+                    "niveau": niveau,
+                    "message": f"{a['ip']} — score AbuseIPDB {a['score']}% — {label} ({a['info']['country']}, {a['info']['isp']})"
+                })
 
     if alertes:
         print(f"[{now:%H:%M:%S}] {len(alertes)} alerte(s) → envoi mail...")
