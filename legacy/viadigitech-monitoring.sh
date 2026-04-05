@@ -37,5 +37,5 @@ echo " " >> $LOGFILE
 BANNED=$(fail2ban-client status sshd | grep "Currently banned" | awk '{print $4}')
 
 if [ "$BANNED" -gt 0 ]; then
-    echo "Alerte Fail2Ban - $BANNED IP actuellement bannies sur $HOSTNAME" | mail -s "Alerte Fail2Ban [$HOSTNAME]" david@viadigitech.com
+    echo "Alerte Fail2Ban - $BANNED IP actuellement bannies sur $HOSTNAME" | mail -s "Alerte Fail2Ban [$HOSTNAME]" "${SOC_MAIL_TO:-admin@example.com}"
 fi

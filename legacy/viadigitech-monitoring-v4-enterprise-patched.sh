@@ -107,4 +107,4 @@ EOF
 echo "$MESSAGE" >> $DAILYREPORT
 
 # Envoi email avec pièce jointe graphique et timestamp dans le sujet
-echo "$MESSAGE" | mutt -s "ViaDigiTech Monitoring [$HOSTNAME] - $TIMESTAMP" -a $LOGDIR/history.png -- david@viadigitech.com
+echo "$MESSAGE" | mutt -s "ViaDigiTech Monitoring [$HOSTNAME] - $TIMESTAMP" -a $LOGDIR/history.png -- "${SOC_MAIL_TO:-admin@example.com}"
