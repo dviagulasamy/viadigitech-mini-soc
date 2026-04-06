@@ -35,7 +35,7 @@ AUTO_BAN_SCORE   = 80    # score AbuseIPDB minimum pour ban auto
 # Seuils d'alerte
 SEUILS = {
     "ssh_fails":    20,    # tentatives SSH en 15 min
-    "new_bans":      5,    # nouveaux bans Fail2Ban en 15 min
+    "new_bans":      8,    # nouveaux bans Fail2Ban en 15 min (relevé: trop bruyant à 5)
     "cpu_percent":  90,    # CPU %
     "ram_percent":  90,    # RAM %
     "disk_percent": 90,    # Disque %
@@ -232,8 +232,8 @@ def enrich_and_act(top_ips):
 # DÉDUPLICATION — évite les alertes répétitives
 # ─────────────────────────────────────────
 
-def already_alerted(key):
-    """Retourne True si une alerte pour cette clé a été envoyée il y a moins de 30 min."""
+def already_alerted(key, minutes=30):
+    """Retourne True si une alerte pour cette clé a été envoyée il y a moins de `minutes` min."""
     if not os.path.exists(STATE_FILE):
         return False
     with open(STATE_FILE, "r") as f:
@@ -242,7 +242,7 @@ def already_alerted(key):
             if len(parts) == 2 and parts[0] == key:
                 try:
                     ts = datetime.fromisoformat(parts[1])
-                    if datetime.now() - ts < timedelta(minutes=30):
+                    if datetime.now() - ts < timedelta(minutes=minutes):
                         return True
                 except:
                     pass
@@ -258,10 +258,58 @@ def mark_alerted(key):
         f.writelines(lines[-50:])
 
 # ─────────────────────────────────────────
+# ANALYSE IA — OLLAMA (alertes temps réel)
+# ─────────────────────────────────────────
+
+def ollama_alert_analysis(alertes, sys_metrics, ssh_fails, new_bans, actions):
+    """Génère une analyse IA contextuelle pour le mail d'alerte. Retourne du texte HTML-safe."""
+    bans_auto = [a for a in actions if a["action"] in ("BAN_AUTO", "DRYRUN_BAN")]
+    bans_detail = ", ".join(
+        f"{a['ip']} ({a['info'].get('country','?')}, score {a['score']}%)"
+        for a in bans_auto[:5]
+    ) if bans_auto else "aucun"
+
+    niveaux = [a["niveau"] for a in alertes]
+    has_critical = "CRITIQUE" in niveaux
+
+    prompt = f"""IMPORTANT : réponds UNIQUEMENT en français, sans mélanger d'autres langues.
+
+Tu es un analyste SOC. Une alerte vient d'être déclenchée sur le serveur VPS ViaDigiTech. Analyse la situation et donne une réponse courte et opérationnelle.
+
+CONTEXTE DE L'ALERTE :
+- Heure : {datetime.now().strftime('%H:%M')}
+- Niveau : {"CRITIQUE" if has_critical else "AVERTISSEMENT"}
+- Alertes déclenchées : {[a['message'] for a in alertes]}
+- CPU actuel : {sys_metrics['cpu']:.1f}%
+- RAM actuelle : {sys_metrics['ram']:.1f}%
+- Disque : {sys_metrics['disk']:.1f}%
+- Tentatives SSH (15 min) : {ssh_fails}
+- Nouveaux bans fail2ban (15 min) : {len(new_bans)}
+- IPs bannies via AbuseIPDB : {bans_detail}
+
+Réponds en 3 points numérotés, en français :
+1. DIAGNOSTIC : que se passe-t-il concrètement ? (1 phrase)
+2. RISQUE IMMÉDIAT : quel est le vrai danger si cette alerte est ignorée ?
+3. ACTION : une seule commande ou action à faire maintenant (sois précis)
+
+Maximum 100 mots. Pas de formule de politesse."""
+
+    try:
+        r = requests.post(
+            "http://localhost:11434/api/generate",
+            json={"model": "qwen2.5:3b", "prompt": prompt, "stream": False},
+            timeout=90
+        )
+        return r.json().get("response", "").strip()
+    except Exception as e:
+        return f"[Analyse IA indisponible : {e}]"
+
+
+# ─────────────────────────────────────────
 # ALERTE MAIL
 # ─────────────────────────────────────────
 
-def send_alert(alertes, sys_metrics, ssh_fails, top_ips, new_bans, actions=None):
+def send_alert(alertes, sys_metrics, ssh_fails, top_ips, new_bans, actions=None, ai_analysis=None):
     now = datetime.now()
     hostname = os.uname().nodename
     actions = actions or []
@@ -322,6 +370,15 @@ def send_alert(alertes, sys_metrics, ssh_fails, top_ips, new_bans, actions=None)
                 ts = parts[0][11:16]  # HH:MM
                 audit_rows += f"<tr><td style='padding:5px;border:1px solid #1e2035;color:#64748b;font-size:11px'>{ts}</td><td style='padding:5px;border:1px solid #1e2035;font-family:monospace;font-size:11px'>{parts[1]}</td><td style='padding:5px;border:1px solid #1e2035;font-size:11px'>{parts[2]}</td><td style='padding:5px;border:1px solid #1e2035;font-size:11px'>{parts[3]}%</td></tr>"
 
+    # Bloc analyse IA
+    ai_html = ""
+    if ai_analysis:
+        ai_formatted = ai_analysis.replace("\n", "<br>").replace("  ", "&nbsp;&nbsp;")
+        ai_html = f"""<div class="card" style="border-left:3px solid #818cf8">
+  <div style="font-weight:bold;color:#a5b4fc;margin-bottom:10px">🤖 Analyse IA · qwen2.5:3b</div>
+  <div style="background:#0f1117;border:1px solid #2d3154;border-radius:8px;padding:14px;font-size:13px;line-height:1.75;color:#e2e8f0">{ai_formatted}</div>
+</div>"""
+
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <style>
@@ -343,6 +400,8 @@ def send_alert(alertes, sys_metrics, ssh_fails, top_ips, new_bans, actions=None)
   <table><thead><tr><th style="width:110px">Niveau</th><th>Détail</th></tr></thead>
   <tbody>{rows}</tbody></table>
 </div>
+
+{ai_html}
 
 {actions_html}
 
@@ -421,7 +480,9 @@ def main():
         print(f"[{now:%H:%M:%S}] Vérification AbuseIPDB ({len(top_ips)} IPs)...")
         actions = enrich_and_act(top_ips)
         bans_auto = [a for a in actions if a["action"] in ("BAN_AUTO", "DRYRUN_BAN")]
-        if bans_auto:
+        # Dédup bans_auto : 1 seul mail d'alerte par heure pour les auto-bans
+        if bans_auto and not already_alerted("bans_auto_batch", minutes=60):
+            mark_alerted("bans_auto_batch")
             for a in bans_auto:
                 niveau = "CRITIQUE" if a["action"] == "BAN_AUTO" else "AVERTISSEMENT"
                 label = "Banni automatiquement" if a["action"] == "BAN_AUTO" else "Ban recommandé (dry-run)"
@@ -431,8 +492,9 @@ def main():
                 })
 
     if alertes:
-        print(f"[{now:%H:%M:%S}] {len(alertes)} alerte(s) → envoi mail...")
-        send_alert(alertes, sys_metrics, ssh_fails, top_ips, new_bans, actions)
+        print(f"[{now:%H:%M:%S}] {len(alertes)} alerte(s) → analyse IA + envoi mail...")
+        ai_analysis = ollama_alert_analysis(alertes, sys_metrics, ssh_fails, new_bans, actions)
+        send_alert(alertes, sys_metrics, ssh_fails, top_ips, new_bans, actions, ai_analysis)
         print(f"[{now:%H:%M:%S}] Alerte envoyée à {MAIL_TO}")
     else:
         print(f"[{now:%H:%M:%S}] Aucune alerte. CPU:{sys_metrics['cpu']:.1f}% RAM:{sys_metrics['ram']:.1f}% Disk:{sys_metrics['disk']:.1f}% SSH:{ssh_fails} Bans:{len(new_bans)}")

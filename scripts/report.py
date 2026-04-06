@@ -7,6 +7,7 @@ Métriques système + analyse sécurité + commentaire Ollama + graphiques web.
 import os
 import re
 import json
+import fcntl
 import smtplib
 import subprocess
 from datetime import datetime, timedelta
@@ -23,6 +24,7 @@ import requests
 # ─────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────
+LOCK_FILE     = "/tmp/report_daily.lock"
 MAIL_FROM     = "secops@vps-23de4a3d.vps.ovh.net"
 MAIL_TO       = ["david@viadigitech.com"]
 MAIL_SUBJECT  = "🛡️ AI SecOps — Rapport du {date}"
@@ -78,7 +80,10 @@ def run_cmd(cmd):
     except: return ""
 
 def get_docker_info():
-    raw = run_cmd("docker ps --format '{{json .}}'")
+    # sg docker force le groupe docker même si la session ne l'a pas encore chargé
+    raw = run_cmd("sg docker -c \"docker ps --format '{{json .}}'\"")
+    if not raw:
+        raw = run_cmd("docker ps --format '{{json .}}'")
     containers = []
     for line in raw.splitlines():
         try: containers.append(json.loads(line.strip()))
@@ -155,7 +160,7 @@ def chart_gauges(m):
     fig, axes = plt.subplots(1, 3, figsize=(10, 3.2), facecolor=C["surface"])
     items = [("CPU", m["cpu_percent"], "%"), ("RAM", m["mem_percent"], "%"), ("Disque", m["disk_percent"], "%")]
     for ax, (label, val, unit) in zip(axes, items):
-        color = C["green"] if val < 60 else (C["yellow"] if val < 80 else C["red"])
+        color = C["green"] if val < 70 else (C["yellow"] if val < 85 else C["red"])
         ax.set_facecolor(C["surface"])
         bg = plt.matplotlib.patches.Wedge((0.5, 0.3), 0.38, 0, 360, width=0.10,
                                            facecolor=C["border"], transform=ax.transAxes)
@@ -267,7 +272,9 @@ def build_ai_analysis(metrics, failed_ips, failed_users, total_attempts, accepte
     now = datetime.now()
 
     # 1. Commentaire matinal — ton direct, bref
-    prompt_morning = f"""Tu es l'assistant IA SecOps du serveur VPS ViaDigiTech. Chaque matin tu rédiges un bref message de synthèse personnalisé.
+    prompt_morning = f"""IMPORTANT : réponds UNIQUEMENT en français, sans mélanger d'autres langues.
+
+Tu es l'assistant IA SecOps du serveur VPS ViaDigiTech. Chaque matin tu rédiges un bref message de synthèse personnalisé pour David, l'administrateur.
 
 Données du {now.strftime('%A %d %B %Y à %H:%M')} :
 - CPU : {metrics['cpu_percent']}% | Load : {metrics['load_1']}/{metrics['load_5']}/{metrics['load_15']} sur {metrics['cpu_count']} CPUs
@@ -276,43 +283,56 @@ Données du {now.strftime('%A %d %B %Y à %H:%M')} :
 - Uptime : {metrics['uptime_days']} jours
 - Tentatives SSH échouées (24h) : {total_attempts}
 - IPs bannies par fail2ban (24h) : {sum(bans.values())}
-- Connexions SSH acceptées : {len(accepted)}
+- Connexions SSH acceptées (hors Docker) : {sum(1 for a in accepted if not a['ip'].startswith('10.'))}
 - Conteneurs Docker actifs : {len(containers)}
 
-Rédige un message de bonjour professionnel et chaleureux (3-4 phrases max), comme si tu t'adressais directement à l'administrateur. Mentionne ce qui se passe concrètement ce matin : si tout va bien, dis-le clairement. Si quelque chose mérite attention, signale-le. Utilise un ton direct et humain, pas robotique."""
+Rédige un message de bonjour direct en 3-4 phrases max. Commence par "Bonjour David,". Mentionne les 2 points les plus importants de cette nuit (bons ou mauvais). Termine par une recommandation concrète si nécessaire, sinon "RAS côté actions". Signe "— ViaDigiTech SOC IA". Ne remplis pas de placeholder comme "[Votre Nom]"."""
 
     # 2. Analyse sécurité détaillée
     top_ips = failed_ips.most_common(5)
     top_users = failed_users.most_common(5)
-    prompt_security = f"""Tu es expert en cybersécurité Linux. Analyse ces données de sécurité SSH des dernières 24h :
+    # Corréler les IPs bannies par /24
+    subnets = Counter()
+    for ip in bans:
+        subnet = ".".join(ip.split(".")[:3]) + ".0/24"
+        subnets[subnet] += 1
+    top_subnets = subnets.most_common(3)
+    prompt_security = f"""IMPORTANT : réponds UNIQUEMENT en français, sans mélanger d'autres langues.
+
+Tu es expert en cybersécurité Linux. Analyse ces données SSH des dernières 24h :
 
 Tentatives totales : {total_attempts}
-IPs uniques : {len(failed_ips)}
+IPs uniques attaquantes : {len(failed_ips)}
 Top 5 IPs : {top_ips}
 Usernames ciblés : {top_users}
-IPs bannies fail2ban : {sum(bans.values())} ({len(bans)} IPs)
+IPs bannies fail2ban : {sum(bans.values())} ({len(bans)} IPs distinctes)
+Sous-réseaux /24 les plus actifs : {top_subnets}
 Connexions légitimes acceptées : {len(accepted)}
 
-Réponds en 4 points numérotés :
-1. NIVEAU DE MENACE : (FAIBLE / MODÉRÉ / ÉLEVÉ / CRITIQUE) — justification en 1 phrase
-2. PATTERN DÉTECTÉ : quel type d'attaque, est-ce coordonné ou aléatoire ?
-3. FAIL2BAN : est-il efficace ? Faut-il ajuster la config ?
-4. ACTION RECOMMANDÉE : une seule action concrète prioritaire
+Réponds en 4 points numérotés, en français :
+1. NIVEAU DE MENACE : FAIBLE / MODÉRÉ / ÉLEVÉ / CRITIQUE — justifie en 1 phrase avec les chiffres
+2. PATTERN DÉTECTÉ : type d'attaque (brute-force distribuée / scan opportuniste / ciblé), coordonné ou non, pays dominants si visibles dans les IPs
+3. FAIL2BAN : taux de couverture (bans/tentatives), efficacité, ajustement suggéré si nécessaire
+4. ACTION PRIORITAIRE : une seule action concrète avec commande si applicable
 
-Sois précis et concis. Maximum 150 mots."""
+Maximum 160 mots. Sois précis et opérationnel."""
 
     # 3. Analyse performance
-    prompt_perf = f"""Tu es expert en administration système Linux. Évalue ces métriques :
+    prompt_perf = f"""IMPORTANT : réponds UNIQUEMENT en français, sans mélanger d'autres langues.
 
-CPU : {metrics['cpu_percent']}% (load {metrics['load_1']}/{metrics['load_5']}/{metrics['load_15']} / {metrics['cpu_count']} CPUs)
-RAM : {metrics['mem_percent']}% ({metrics['mem_used_gb']}/{metrics['mem_total_gb']} Go)
+Tu es expert en administration système Linux. Évalue ces métriques :
+
+CPU : {metrics['cpu_percent']}% (load {metrics['load_1']}/{metrics['load_5']}/{metrics['load_15']} sur {metrics['cpu_count']} CPUs)
+RAM : {metrics['mem_percent']}% ({metrics['mem_used_gb']}/{metrics['mem_total_gb']} Go utilisés)
 Disque : {metrics['disk_percent']}% ({metrics['disk_used_gb']}/{metrics['disk_total_gb']} Go)
 Swap : {metrics['swap_used_gb']}/{metrics['swap_total_gb']} Go
 
-Donne une évaluation en 3 points :
-1. ÉTAT GLOBAL : (OPTIMAL / CORRECT / DÉGRADÉ / CRITIQUE)
-2. POINT D'ATTENTION : le seul indicateur qui mérite surveillance
-3. CONSEIL : une optimisation concrète si nécessaire, sinon "RAS"
+Note : le CPU élevé à 7h est normal (génération rapport IA via Ollama).
+
+Réponds en 3 points numérotés, en français :
+1. ÉTAT GLOBAL : OPTIMAL / CORRECT / DÉGRADÉ / CRITIQUE — avec justification
+2. POINT D'ATTENTION : l'unique indicateur qui mérite surveillance aujourd'hui
+3. CONSEIL : une action concrète si nécessaire, sinon "RAS"
 
 Maximum 80 mots."""
 
@@ -329,10 +349,10 @@ Maximum 80 mots."""
 # TEMPLATE HTML
 # ─────────────────────────────────────────
 
-def _color(val, warn=60, crit=80):
+def _color(val, warn=70, crit=85):
     return "#ef4444" if val >= crit else ("#eab308" if val >= warn else "#22c55e")
 
-def _dot(val, warn=60, crit=80):
+def _dot(val, warn=70, crit=85):
     return "dot-red" if val >= crit else ("dot-yellow" if val >= warn else "dot-green")
 
 def build_html(metrics, failed_ips, failed_users, total_attempts, accepted,
@@ -532,6 +552,14 @@ def send_mail(html, subject):
 # ─────────────────────────────────────────
 
 def main():
+    # ── Lock : empêche le double envoi si le cron spawne deux processus ──
+    lockf = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print(f"[{datetime.now():%H:%M:%S}] Rapport déjà en cours — abandon.")
+        return
+
     now = datetime.now()
     print(f"[{now:%H:%M:%S}] Collecte métriques...")
     metrics    = get_system_metrics()
@@ -566,6 +594,16 @@ def main():
 
     with open("/home/ubuntu/secops/last_report.html", "w") as f:
         f.write(html)
+
+    # Sauvegarde résumé IA pour le dashboard
+    import json as _json
+    with open("/home/ubuntu/secops/last_ai_summary.json", "w") as f:
+        _json.dump({
+            "date": now.strftime("%d/%m/%Y %H:%M"),
+            "morning": morning,
+            "security": security,
+            "perf": perf,
+        }, f, ensure_ascii=False)
 
     print(f"[{now:%H:%M:%S}] ✓ Rapport envoyé et sauvegardé.")
 
