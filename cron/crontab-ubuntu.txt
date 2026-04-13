@@ -1,1 +1,14 @@
-0 7 * * * /home/ubuntu/viadigitech-soc-v5-3/viadigitech-monitoring-v5-enterprise-ai.sh
+# ─── ViaDigiTech SOC ───────────────────────────────────────────
+# Variables d'environnement (remplacer les valeurs)
+SOC_MAIL_TO=david@viadigitech.com
+SOC_MAIL_FROM=secops@viadigitech.com
+ABUSEIPDB_KEY=YOUR_ABUSEIPDB_KEY
+ANYTHINGLLM_KEY=YOUR_ANYTHINGLLM_KEY
+SOC_ACTIONS_KEY=YOUR_RANDOM_HEX_KEY  # générer avec : openssl rand -hex 24
+
+# m h  dom mon dow   command
+#0 7 * * * bash /home/ubuntu/viadigitech-soc-v5-3/viadigitech-monitoring-v5-enterprise-ai.sh   # désactivé (doublon)
+0 7 * * * python3 /home/ubuntu/secops/report.py >> /home/ubuntu/secops/report.log 2>&1
+0 7 * * * python3 /home/ubuntu/secops/rag_ingest.py >> /home/ubuntu/secops/rag_ingest.log 2>&1
+*/15 * * * * python3 /home/ubuntu/secops/detector.py >> /home/ubuntu/secops/detector.log 2>&1
+*/15 * * * * python3 /home/ubuntu/secops/dashboard.py >> /home/ubuntu/secops/dashboard.log 2>&1

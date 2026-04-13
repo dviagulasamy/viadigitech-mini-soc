@@ -25,9 +25,9 @@ import requests
 # CONFIG
 # ─────────────────────────────────────────
 LOCK_FILE     = "/tmp/report_daily.lock"
-MAIL_FROM     = "secops@vps-23de4a3d.vps.ovh.net"
-MAIL_TO       = ["david@viadigitech.com"]
-MAIL_SUBJECT  = "🛡️ AI SecOps — Rapport du {date}"
+MAIL_FROM     = os.environ.get("SOC_MAIL_FROM", "secops@viadigitech.com")
+MAIL_TO       = os.environ.get("SOC_MAIL_TO", "david@viadigitech.com").split(",")
+DASHBOARD_URL = "http://graph.viadigitech.com/soc/"
 OLLAMA_URL    = "http://localhost:11434/api/generate"
 OLLAMA_MODEL  = "qwen2.5:3b"
 OLLAMA_TIMEOUT = 300          # 5 min max pour le prompt long
@@ -526,8 +526,13 @@ def build_html(metrics, failed_ips, failed_users, total_attempts, accepted,
 </div>
 
 <!-- FOOTER -->
-<div style="text-align:center;font-size:11px;color:#334155;margin-top:8px;padding:14px;border-top:1px solid #1e2035">
-  <span style="color:#a0aec0">AI SecOps · {hostname} · {now.strftime('%d/%m/%Y %H:%M')} · {OLLAMA_MODEL}</span>
+<div style="text-align:center;margin-top:8px;padding:16px;border-top:1px solid #1e2035">
+  <a href="{DASHBOARD_URL}" style="display:inline-block;background:linear-gradient(135deg,#312e81,#1e1b4b);border:1px solid #4338ca;color:#a5b4fc;text-decoration:none;padding:9px 22px;border-radius:8px;font-size:13px;font-weight:600;margin-bottom:12px">
+    🖥️ Ouvrir le Dashboard SOC
+  </a>
+  <div style="font-size:11px;color:#334155;margin-top:8px">
+    <span style="color:#a0aec0">AI SecOps · {hostname} · {now.strftime('%d/%m/%Y %H:%M')} · {OLLAMA_MODEL}</span>
+  </div>
 </div>
 
 </div>
@@ -588,7 +593,17 @@ def main():
     html = build_html(metrics, failed_ips, failed_users, total,
                       accepted, containers, bans, morning, security, perf, charts)
 
-    subject = MAIL_SUBJECT.format(date=now.strftime("%d/%m/%Y"))
+    # Sujet enrichi avec niveau de menace
+    ban_count  = sum(bans.values())
+    if ban_count > 30 or total > 500:
+        threat_icon, threat_label = "🔴", "CRITIQUE"
+    elif ban_count > 15 or total > 200:
+        threat_icon, threat_label = "🟠", "ÉLEVÉE"
+    elif ban_count > 5 or total > 50:
+        threat_icon, threat_label = "🟡", "MODÉRÉE"
+    else:
+        threat_icon, threat_label = "🟢", "NORMALE"
+    subject = f"{threat_icon} AI SecOps — Menace {threat_label} · {ban_count} bans · {total} tentatives SSH — {now.strftime('%d/%m/%Y')}"
     print(f"[{now:%H:%M:%S}] Envoi à {MAIL_TO}...")
     send_mail(html, subject)
 
