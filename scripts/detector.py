@@ -45,6 +45,21 @@ SEUILS = {
 WHITELIST = ["176.134.132.129"]
 
 # ─────────────────────────────────────────
+# CONCURRENCE OLLAMA
+# ─────────────────────────────────────────
+
+def is_report_running():
+    """Retourne True si report.py tourne (évite la contention CPU avec Ollama à 7h)."""
+    for proc in psutil.process_iter(["pid", "cmdline"]):
+        try:
+            cmdline = " ".join(proc.info["cmdline"] or [])
+            if "report.py" in cmdline and proc.pid != os.getpid():
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+    return False
+
+# ─────────────────────────────────────────
 # COLLECTE
 # ─────────────────────────────────────────
 
@@ -168,7 +183,7 @@ def ollama_decide(ip, attempts, info):
         r = requests.post(
             "http://localhost:11434/api/generate",
             json={"model": "qwen2.5:3b", "prompt": prompt, "stream": False},
-            timeout=60
+            timeout=90
         )
         response = r.json().get("response", "").strip()
         # Extraire le JSON même si du texte parasite l'entoure
@@ -201,9 +216,13 @@ def enrich_and_act(top_ips):
             print(f"[{'AutoBan' if AUTO_BAN_MODE == 'auto' else 'DryRun'}] {ip} — score {score}% → {action}")
 
         elif score >= 40:
-            # Zone grise → Ollama décide
-            print(f"[Ollama] Zone grise {ip} (score {score}%) — consultation qwen2.5:3b...")
-            decision = ollama_decide(ip, attempts, info)
+            # Zone grise → Ollama décide (sauf si report.py tourne)
+            if is_report_running():
+                print(f"[Ollama] Zone grise {ip} — report.py actif, décision différée")
+                decision = {"action": "SURVEILLE", "raison": "Décision différée (report.py actif)", "urgence": "faible"}
+            else:
+                print(f"[Ollama] Zone grise {ip} (score {score}%) — consultation qwen2.5:3b...")
+                decision = ollama_decide(ip, attempts, info)
             ollama_action = decision.get("action", "SURVEILLE")
             ollama_raison = decision.get("raison", "")
             ollama_urgence = decision.get("urgence", "faible")
@@ -298,7 +317,7 @@ Maximum 100 mots. Pas de formule de politesse."""
         r = requests.post(
             "http://localhost:11434/api/generate",
             json={"model": "qwen2.5:3b", "prompt": prompt, "stream": False},
-            timeout=90
+            timeout=120
         )
         return r.json().get("response", "").strip()
     except Exception as e:
@@ -492,8 +511,12 @@ def main():
                 })
 
     if alertes:
-        print(f"[{now:%H:%M:%S}] {len(alertes)} alerte(s) → analyse IA + envoi mail...")
-        ai_analysis = ollama_alert_analysis(alertes, sys_metrics, ssh_fails, new_bans, actions)
+        if is_report_running():
+            print(f"[{now:%H:%M:%S}] {len(alertes)} alerte(s) → report.py actif, analyse IA skippée (contention CPU)")
+            ai_analysis = None
+        else:
+            print(f"[{now:%H:%M:%S}] {len(alertes)} alerte(s) → analyse IA + envoi mail...")
+            ai_analysis = ollama_alert_analysis(alertes, sys_metrics, ssh_fails, new_bans, actions)
         send_alert(alertes, sys_metrics, ssh_fails, top_ips, new_bans, actions, ai_analysis)
         print(f"[{now:%H:%M:%S}] Alerte envoyée à {MAIL_TO}")
     else:
