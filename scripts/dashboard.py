@@ -1018,7 +1018,7 @@ tr:last-child td{{border-bottom:none}}
 .threat-hero-bar{{height:6px;border-radius:3px;background:#1e2942;margin-top:10px;overflow:hidden}}
 .threat-hero-fill{{height:6px;border-radius:3px;transition:width .8s ease}}
 /* ── Sparkline canvas ── */
-.sparkline{{display:block;width:100%;height:32px;margin-top:6px;opacity:.7}}
+.sparkline{{display:block;width:100%;height:40px;margin-top:6px;opacity:.7}}
 /* ── Age indicator ── */
 .age-indicator{{font-size:11px;color:#475569;padding:0 8px;white-space:nowrap}}
 .age-indicator.fresh{{color:#22c55e}}
@@ -1229,7 +1229,7 @@ tr:last-child td{{border-bottom:none}}
   <!-- Graphique 7 jours -->
   <div class="card" style="margin-bottom:14px">
     <h2>Activité — 7 derniers jours</h2>
-    <div id="histChart" style="height:160px;width:100%"></div>
+    <div id="histChart" style="height:240px;width:100%"></div>
   </div>
 
 </div>
@@ -1287,7 +1287,7 @@ tr:last-child td{{border-bottom:none}}
 <div class="screen" id="screen-performance">
   <div class="card" style="margin-bottom:14px">
     <h2>CPU / RAM / Disque — 24 dernières heures</h2>
-    {'<div id="perfChart" style="height:110px;width:100%"></div>' if perf_labels else '<div style="color:#475569;font-size:13px;padding:24px 0;text-align:center">Historique en cours de constitution</div>'}
+    {'<div id="perfChart" style="height:240px;width:100%"></div>' if perf_labels else '<div style="color:#475569;font-size:13px;padding:24px 0;text-align:center">Historique en cours de constitution</div>'}
   </div>
   <div class="card" style="margin-bottom:14px">
     <h2>Heatmap des attaques SSH — 7 jours × 24 heures</h2>
@@ -1687,7 +1687,7 @@ function hmDrilldown(day,hour,count){{
     const el=document.getElementById(id);
     if(!el||!data||data.length<2)return;
     const d=data.slice(-8);
-    const chart=echarts.init(el,null,{{renderer:'canvas',width:'auto',height:32}});
+    const chart=echarts.init(el,null,{{renderer:'canvas',width:'auto',height:40}});
     chart.setOption({{
       animation:false,
       grid:{{top:0,bottom:0,left:0,right:0}},
