@@ -1,83 +1,111 @@
+# ViaDigiTech Mini-SOC IA — V6.0 (SOAR Autonome)
 
-# ViaDigiTech Mini-SOC IA — V5.3 (IA Ready Core Base)
-
-> Autonomous lightweight SOC monitoring system for VPS and cloud instances, integrating Fail2Ban, Geolocation, AI-based Risk Scoring, and Automated Daily Reporting.
-
----
-
-## 📊 Description
-
-**ViaDigiTech Mini-SOC IA V5.3** est un système complet de supervision de VPS et serveurs cloud.  
-Il permet d’analyser automatiquement l'état du serveur, les attaques SSH, les IP bannies par Fail2Ban, et fournit :
-
-- Collecte des données système (CPU, RAM, Disk)
-- Extraction et analyse des logs SSH et Fail2Ban
-- Calcul statistique (moyenne glissante + Z-score)
-- Géolocalisation des IP bannies
-- Génération automatique de rapports HTML
-- Génération et hébergement de graphes CPU
-- Envoi quotidien des rapports par email
+> Système SOC léger et autonome pour VPS/cloud : détection temps réel, analyse IA, bannissement automatique, dashboard web et rapports quotidiens HTML.
 
 ---
 
-## 🛠️ Fonctionnalités principales
+## Description
 
-- Monitoring autonome quotidien
-- Calcul de Z-score pour détection d’anomalies
-- Géolocalisation automatique des IP bannies
-- Envoi automatique des rapports via email SMTP
-- Hébergement des graphes avec Caddy (reverse proxy)
-- Architecture légère et industrialisable
+**ViaDigiTech Mini-SOC V6.0** est une plateforme SecOps complète tournant sur un VPS Ubuntu 22.04.  
+Elle surveille en continu l'état du serveur, analyse les attaques SSH, interroge AbuseIPDB, génère des analyses IA via Ollama, et envoie des alertes et rapports par email.
 
 ---
 
-## ⚙️ Architecture technique
+## Fonctionnalités
 
-| Composant | Fonction |
-| --------- | -------- |
-| Python 3.x | Traitement des données, analyse et génération de rapports |
-| Shell (Bash) | Lancement planifié via crontab |
-| Fail2Ban | Extraction des tentatives SSH malveillantes |
-| Matplotlib / Pandas | Statistiques & graphes CPU |
-| ip-api.com | Géolocalisation des IP |
-| SMTP (sendmail/msmtp) | Envoi des rapports |
-| Caddy | Reverse proxy HTTP pour hébergement des graphes |
+- **Détection temps réel** (toutes les 15 min) : CPU, RAM, disque, tentatives SSH, bans
+- **Analyse IA** des alertes via Ollama (modèle `qwen2.5:3b`) — réponses en français
+- **Bannissement automatique** des IP malveillantes via AbuseIPDB + Fail2Ban
+- **Rapport quotidien HTML** avec graphiques 7 jours, résumé IA, historique bans
+- **Dashboard web** temps réel (onglets IA, graphiques, boutons action ban/unban/analyze)
+- **API d'actions** sécurisée (Flask, clé API) pour ban/unban/analyze depuis le dashboard
+- **RAG AnythingLLM** : ingestion quotidienne des rapports SOC pour requêtes contextuelles
+- **Déduplication des alertes** : pas de double envoi sur une même fenêtre de 15 min
+- **Alertes disque/RAM** sur 2 niveaux (warning 85%/88%, critique 92% + purge auto safe)
 
 ---
 
-## 📂 Arborescence du projet
+## Architecture technique
 
-```bash
+| Composant | Rôle |
+|-----------|------|
+| `detector.py` | Détecteur alertes 15 min — SSH, seuils, AbuseIPDB, Ollama, ban auto |
+| `report.py` | Rapport quotidien HTML + graphiques matplotlib + résumé IA |
+| `dashboard.py` | Dashboard HTML v3 — onglets IA, graphique 7j, boutons action |
+| `actions.py` | API Flask port 8022 — ban / unban / analyze (clé API requise) |
+| `rag_ingest.py` | Ingestion quotidienne des rapports dans AnythingLLM |
+| Ollama (`qwen2.5:3b`) | LLM local pour toutes les analyses SOC |
+| AnythingLLM | RAG containerisé, requêtes contextuelles sur historique SOC |
+| Postfix | SMTP local, relay vers Google Workspace |
+| Nginx Proxy Manager | Reverse proxy Docker — domaines SOC |
+| Fail2Ban | Bannissement IP SSH |
+
+---
+
+## Arborescence
+
+```
 viadigitech-mini-soc/
-├── cron/                    # Fichiers de planification crontab
-├── docs/                    # Documentation technique complète
-├── scripts/                 # Scripts Python et Shell
-├── data/                    # Données collectées (CSV)
-├── logs/                    # Rapports HTML générés
-├── INSTALL.md               # Procédure d'installation serveur
-├── LICENSE                  # Licence MIT
-├── README.md                # Ce fichier de présentation GitHub
-└── .gitignore               # Exclusions Git
+├── scripts/
+│   ├── detector.py          # Détecteur alertes temps réel
+│   ├── report.py            # Rapport quotidien
+│   ├── dashboard.py         # Dashboard web v3
+│   ├── actions.py           # API actions Flask
+│   └── rag_ingest.py        # Ingestion RAG
+├── cron/                    # Configuration crontab
+├── docs/                    # Documentation technique
+├── legacy/                  # Anciens scripts bash (désactivés)
+├── logs/                    # Logs et rapports générés
+├── INSTALL.md               # Procédure d'installation
+├── PROJECT_STATE.md         # État détaillé du projet
+└── README.md
 ```
 
 ---
 
-## 🔮 Backlog d'évolution possible
+## Déploiement (crontab)
 
-- Nettoyage des crontabs historiques
-- Passage à SMTP sécurisé OAuth (Google Workspace)
-- Reporting hebdomadaire/mensuel
-- Dashboard Web UI centralisé
-- Archivage automatique des historiques
+Les variables d'environnement doivent être définies **avant** les jobs dans le crontab :
+
+```
+SOC_MAIL_FROM=secops@yourdomain.com
+SOC_MAIL_TO=admin@yourdomain.com
+ABUSEIPDB_KEY=<votre_clé>
+ANYTHINGLLM_KEY=<votre_clé>
+SOC_ACTIONS_KEY=<votre_clé>
+
+0 7 * * *    python3 /home/ubuntu/secops/report.py >> report.log 2>&1
+0 7 * * *    python3 /home/ubuntu/secops/rag_ingest.py >> rag_ingest.log 2>&1
+*/15 * * * * python3 /home/ubuntu/secops/detector.py >> detector.log 2>&1
+*/15 * * * * python3 /home/ubuntu/secops/dashboard.py >> dashboard.log 2>&1
+```
 
 ---
 
-## 🔒 Licence
+## Domaines (Nginx Proxy Manager)
 
-MIT License - 2025 ViaDigiTech
+| Domaine | Service |
+|---------|---------|
+| `graph.viadigitech.com` | Rapports SOC + API actions (`/action/`) |
+| `soc.viadigitech.com` | Dashboard (basic auth) |
+| `n8n.viadigitech.com` | n8n automation |
 
 ---
 
-## 🙏 Remerciements
+## Prérequis
+
+- Ubuntu 22.04 LTS
+- Python 3.10+ avec venv (`psutil`, `requests`, `pandas`, `matplotlib`, `flask`)
+- Ollama + modèle `qwen2.5:3b`
+- Fail2Ban, Postfix
+- Docker (AnythingLLM, Nginx Proxy Manager)
+
+---
+
+## Licence
+
+MIT License — 2025-2026 ViaDigiTech
+
+---
 
 Projet conçu et maintenu par **ViaDigiTech — IA Digital Security Automation**.
