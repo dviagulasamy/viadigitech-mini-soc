@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ViaDigiTech SOC — Dashboard HTML temps réel
-Exécuté toutes les 15 min via cron, servi par Caddy.
+Exécuté toutes les 15 min via cron, servi par Nginx Proxy Manager.
 v3 : onglets IA, graphique 7 jours, boutons d'action opérationnels.
 """
 
@@ -340,17 +340,33 @@ def build_html():
     ram_color  = gc(metrics["ram"],  WARN_MEM,  CRIT_MEM)
     disk_color = gc(metrics["disk"], WARN_DISK, CRIT_DISK)
 
-    # JS actions (seulement si clé configurée)
+    # JS actions (seulement si clé configurée côté serveur)
     actions_js = ""
     if ACTIONS_KEY:
         actions_js = f"""
+function getKey() {{
+  let k = sessionStorage.getItem('soc_api_key');
+  if (!k) {{
+    k = window.prompt('Clé API SOC :') || '';
+    if (k) sessionStorage.setItem('soc_api_key', k);
+  }}
+  return k;
+}}
+
 async function apiCall(endpoint, data) {{
+  const key = getKey();
+  if (!key) return {{ok: false, error: 'Clé API manquante'}};
   const res = await fetch('{ACTIONS_API}' + endpoint, {{
     method: 'POST',
-    headers: {{'Content-Type': 'application/json', 'X-SOC-Key': '{ACTIONS_KEY}'}},
+    headers: {{'Content-Type': 'application/json', 'X-SOC-Key': key}},
     body: JSON.stringify(data)
   }});
-  return res.json();
+  const r = await res.json();
+  if (res.status === 401 || res.status === 403) {{
+    sessionStorage.removeItem('soc_api_key');
+    return {{ok: false, error: 'Clé API invalide — réessayez'}};
+  }}
+  return r;
 }}
 
 async function banIP(ip) {{
@@ -366,7 +382,9 @@ async function unbanIP(ip) {{
 }}
 
 async function askAI() {{
+  window.pauseRefresh();
   const prompt = window.prompt('Question pour le SOC IA :', 'Quel est le niveau de risque actuel sur le serveur ?');
+  window.resumeRefresh();
   if (!prompt) return;
   showToast('Analyse en cours...', true, 3000);
   const r = await apiCall('/analyze', {{prompt}});
@@ -391,7 +409,7 @@ function showToast(msg, ok, duration=4000) {{
     html = f"""<!DOCTYPE html>
 <html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="refresh" content="300">
+<meta name="dashboard-refresh" content="300">
 <title>SOC Dashboard — {hostname}</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
@@ -539,6 +557,21 @@ function showToast(msg, ok, duration=4000) {{
 </div>
 
 <script>
+// ── Refresh intelligent (pause si prompt IA ouvert) ──
+(function() {{
+  let lastActivity = Date.now();
+  let paused = false;
+  document.addEventListener('click', () => {{ lastActivity = Date.now(); }});
+  document.addEventListener('keydown', () => {{ lastActivity = Date.now(); }});
+  window.pauseRefresh = () => {{ paused = true; }};
+  window.resumeRefresh = () => {{ paused = false; lastActivity = Date.now(); }};
+  setTimeout(function check() {{
+    const idle = Date.now() - lastActivity > 10000;
+    if (!paused && idle) {{ location.reload(); return; }}
+    setTimeout(check, 300000);
+  }}, 300000);
+}})();
+
 // ── Onglets IA ──
 function showTab(id) {{
   document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
