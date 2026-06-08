@@ -1379,7 +1379,7 @@ function handleOverlayClick(e){{
   if(!el)return;
   function update(){{
     const mins=Math.floor((Date.now()-genTime)/60000);
-    if(mins<1){{el.textContent='⟳ à l\'instant';el.className='age-indicator fresh';}}
+    if(mins<1){{el.textContent="⟳ à l'instant";el.className='age-indicator fresh';}}
     else if(mins<10){{el.textContent=`⟳ il y a ${{mins}}min`;el.className='age-indicator fresh';}}
     else if(mins<20){{el.textContent=`⟳ il y a ${{mins}}min`;el.className='age-indicator';}}
     else{{el.textContent=`⟳ il y a ${{mins}}min`;el.className='age-indicator stale';}}
