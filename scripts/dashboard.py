@@ -602,11 +602,17 @@ def build_html():
   <div id="tab-morning" class="tab-pane" style="background:#0a0d14;border:1px solid #1e2942;border-radius:8px;padding:16px;font-size:13px;line-height:1.85;color:#e2e8f0">{fmt(ai_summary.get("morning","Non disponible"))}</div>
   <div id="tab-security" class="tab-pane" style="display:none;background:#0a0d14;border:1px solid #1e2942;border-radius:8px;padding:16px;font-size:13px;line-height:1.85;color:#e2e8f0">{fmt(ai_summary.get("security","Non disponible"))}</div>
   <div id="tab-perf" class="tab-pane" style="display:none;background:#0a0d14;border:1px solid #1e2942;border-radius:8px;padding:16px;font-size:13px;line-height:1.85;color:#e2e8f0">{fmt(ai_summary.get("perf","Non disponible"))}</div>
+  <div style="margin-top:12px;padding:8px 12px;background:#1a1008;border:1px solid #78350f;border-radius:6px;font-size:11px;color:#fbbf24">
+    ⚠️ <strong>Avertissement :</strong> Analyse générée par LLM local (qwen2.5:3b). Les commandes système suggérées peuvent être invalides — vérifier manuellement avant toute exécution.
+  </div>
 </div>
 <div id="ai-response-box" style="display:none;margin-bottom:14px">
   <div class="card" style="border-left:3px solid #4338ca">
     <h2 style="margin-bottom:10px">⚡ Réponse IA temps réel</h2>
-    <div id="ai-response-text" style="font-size:13px;line-height:1.85;color:#e2e8f0"></div>
+      <div id="ai-response-text" style="font-size:13px;line-height:1.85;color:#e2e8f0"></div>
+    <div style="margin-top:12px;padding:8px 12px;background:#1a1008;border:1px solid #78350f;border-radius:6px;font-size:11px;color:#fbbf24">
+      ⚠️ <strong>Avertissement :</strong> Les analyses IA sont générées par un LLM local (qwen2.5:3b) et peuvent contenir des erreurs ou des commandes système <strong>invalides</strong>. Ne jamais exécuter une commande suggérée par l'IA sans vérification manuelle.
+    </div>
   </div>
 </div>"""
     else:
