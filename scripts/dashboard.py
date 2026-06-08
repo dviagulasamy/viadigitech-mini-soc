@@ -454,6 +454,19 @@ def gauge(label, val, unit="%", warn=75, crit=88, sub=""):
 # ─────────────────────────────────────────
 
 def build_html():
+    import hashlib as _hl
+    _pwd = os.environ.get("SOC_DASHBOARD_PWD", "")
+    if not _pwd:  # Charger depuis .env si absent de l'environnement
+        _env_path = os.path.join(os.path.dirname(__file__), ".env")
+        try:
+            for _line in open(_env_path):
+                _line = _line.strip()
+                if _line.startswith("SOC_DASHBOARD_PWD=your_dashboard_password_here
+                    _pwd = _line.split("=", 1)[1].strip()
+                    break
+        except Exception:
+            pass
+    pwd_hash = _hl.sha256(_pwd.encode()).hexdigest() if _pwd else ""
     now        = datetime.now()
     metrics    = get_metrics()
     append_metrics_history(metrics)
@@ -1573,23 +1586,25 @@ tr:last-child td{{border-bottom:none}}
 
 <script>
 // ── Login ──
+const _PWD_HASH="{pwd_hash}";
 async function doLogin(){{
-  const pwd=document.getElementById('login-key').value.trim();
+  const pwd=document.getElementById('login-key').value;
   if(!pwd)return;
-  document.getElementById('login-error').textContent="";
+  const errEl=document.getElementById('login-error');
+  errEl.textContent="";
   try{{
-    const r=await fetch('/action/auth',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{password:pwd}}),signal:AbortSignal.timeout(5000)}});
-    const d=await r.json().catch(()=>({{}}));
-    if(r.ok&&d.ok){{
+    const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(pwd));
+    const hash=Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+    if(hash===_PWD_HASH){{
       sessionStorage.setItem('soc_auth','1');
       document.getElementById('login-overlay').classList.remove('open');
     }}else{{
       const box=document.getElementById('login-box');
-      document.getElementById('login-error').textContent="Mot de passe invalide";
+      errEl.textContent="Mot de passe invalide";
       box.classList.remove('shake');void box.offsetWidth;box.classList.add('shake');
     }}
   }}catch(e){{
-    document.getElementById('login-error').textContent="Erreur réseau — vérifiez la connexion";
+    errEl.textContent="Erreur : "+e.message;
   }}
 }}
 // Exécution directe (script en fin de body, DOM déjà prêt)
