@@ -834,7 +834,7 @@ function askAIWithPrompt(p){{
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 /* ── Reset & base ── */
@@ -1154,19 +1154,19 @@ tr:last-child td{{border-bottom:none}}
         <div class="stat-big" style="color:{cpu_color}" id="live-cpu">{metrics['cpu']:.0f}%</div>
         <div class="stat-label">CPU</div>
         <div class="stat-sub">Load {metrics['load1']}</div>
-        <canvas class="sparkline" id="sp-cpu"></canvas>
+        <div class="sparkline" id="sp-cpu"></div>
       </div>
       <div class="card">
         <div class="stat-big" style="color:{ram_color}" id="live-ram">{metrics['ram']:.0f}%</div>
         <div class="stat-label">RAM</div>
         <div class="stat-sub">{metrics['ram_used']}GB / {metrics['ram_total']}GB</div>
-        <canvas class="sparkline" id="sp-ram"></canvas>
+        <div class="sparkline" id="sp-ram"></div>
       </div>
       <div class="card">
         <div class="stat-big" style="color:{disk_color}">{metrics['disk']:.0f}%</div>
         <div class="stat-label">Disque</div>
         <div class="stat-sub">{metrics['disk_used']}GB / {metrics['disk_total']}GB</div>
-        <canvas class="sparkline" id="sp-disk"></canvas>
+        <div class="sparkline" id="sp-disk"></div>
       </div>
       <div class="card">
         <div class="stat-big" style="color:#ef4444" id="live-bans">{ban_count}</div>
@@ -1229,7 +1229,7 @@ tr:last-child td{{border-bottom:none}}
   <!-- Graphique 7 jours -->
   <div class="card" style="margin-bottom:14px">
     <h2>Activité — 7 derniers jours</h2>
-    <canvas id="histChart" height="160"></canvas>
+    <div id="histChart" style="height:160px;width:100%"></div>
   </div>
 
 </div>
@@ -1287,7 +1287,7 @@ tr:last-child td{{border-bottom:none}}
 <div class="screen" id="screen-performance">
   <div class="card" style="margin-bottom:14px">
     <h2>CPU / RAM / Disque — 24 dernières heures</h2>
-    {'<canvas id="perfChart" height="110"></canvas>' if perf_labels else '<div style="color:#475569;font-size:13px;padding:24px 0;text-align:center">Historique en cours de constitution</div>'}
+    {'<div id="perfChart" style="height:110px;width:100%"></div>' if perf_labels else '<div style="color:#475569;font-size:13px;padding:24px 0;text-align:center">Historique en cours de constitution</div>'}
   </div>
   <div class="card" style="margin-bottom:14px">
     <h2>Heatmap des attaques SSH — 7 jours × 24 heures</h2>
@@ -1590,33 +1590,51 @@ function filterSecurity(){{
   document.getElementById('filter-count').textContent=q||_filter!=='all'?shown+' résultat(s)':'';
 }}
 
-// ── Graphique 7 jours ──
+// ── Graphique bans 7j ECharts ──
 (function(){{
   const el=document.getElementById('histChart');if(!el)return;
-  new Chart(el.getContext('2d'),{{
-    type:'bar',
-    data:{{labels:{hist_labels_js},datasets:[
-      {{label:'Bans auto',data:{hist_bans_js},backgroundColor:'rgba(239,68,68,0.7)',borderColor:'#ef4444',borderWidth:1,borderRadius:4}},
-      {{label:'Surveillés',data:{hist_watch_js},backgroundColor:'rgba(99,102,241,0.5)',borderColor:'#6366f1',borderWidth:1,borderRadius:4}}
-    ]}},
-    options:{{responsive:true,plugins:{{legend:{{labels:{{color:'#94a3b8',font:{{size:11}}}}}},tooltip:{{mode:'index'}}}},
-      scales:{{x:{{ticks:{{color:'#64748b'}},grid:{{color:'#1e2942'}}}},y:{{ticks:{{color:'#64748b'}},grid:{{color:'#1e2942'}},beginAtZero:true}}}}}}
+  const chart=echarts.init(el,'dark');
+  chart.setOption({{
+    backgroundColor:'transparent',
+    tooltip:{{trigger:'axis',axisPointer:{{type:'shadow'}}}},
+    legend:{{textStyle:{{color:'#94a3b8',fontSize:11}},top:4}},
+    grid:{{top:36,bottom:52,left:40,right:12,containLabel:true}},
+    dataZoom:[{{type:'slider',height:18,bottom:4,borderColor:'#1e2942',fillerColor:'rgba(99,102,241,0.15)',handleStyle:{{color:'#6366f1'}},textStyle:{{color:'#64748b',fontSize:10}}}}],
+    xAxis:{{type:'category',data:{hist_labels_js},axisLabel:{{color:'#64748b',fontSize:11}},axisLine:{{lineStyle:{{color:'#1e2942'}}}},splitLine:{{show:false}}}},
+    yAxis:{{type:'value',axisLabel:{{color:'#64748b',fontSize:11}},splitLine:{{lineStyle:{{color:'#1e2942'}}}},minInterval:1}},
+    series:[
+      {{name:'Bans auto',type:'bar',data:{hist_bans_js},itemStyle:{{color:'rgba(239,68,68,0.75)',borderRadius:[3,3,0,0]}},barMaxWidth:32,emphasis:{{itemStyle:{{color:'#ef4444'}}}}}},
+      {{name:'Surveillés',type:'bar',data:{hist_watch_js},itemStyle:{{color:'rgba(99,102,241,0.55)',borderRadius:[3,3,0,0]}},barMaxWidth:32,emphasis:{{itemStyle:{{color:'#6366f1'}}}}}}
+    ]
   }});
+  window.addEventListener('resize',()=>chart.resize());
 }})();
 
-// ── Graphique CPU/RAM 24h ──
+// ── Graphique CPU/RAM 24h ECharts ──
 (function(){{
   const el=document.getElementById('perfChart');if(!el)return;
-  new Chart(el.getContext('2d'),{{
-    type:'line',
-    data:{{labels:{perf_labels_js},datasets:[
-      {{label:'CPU %',data:{perf_cpu_js},borderColor:'#f59e0b',backgroundColor:'rgba(245,158,11,0.07)',borderWidth:2,pointRadius:0,tension:0.3,fill:true}},
-      {{label:'RAM %',data:{perf_ram_js},borderColor:'#6366f1',backgroundColor:'rgba(99,102,241,0.07)',borderWidth:2,pointRadius:0,tension:0.3,fill:true}},
-      {{label:'Disk %',data:{perf_disk_js},borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,0.05)',borderWidth:1.5,pointRadius:0,tension:0.3,borderDash:[4,4],fill:true}}
-    ]}},
-    options:{{responsive:true,plugins:{{legend:{{labels:{{color:'#94a3b8',font:{{size:11}}}}}},tooltip:{{mode:'index',intersect:false}}}},
-      scales:{{x:{{ticks:{{color:'#64748b',maxTicksLimit:10}},grid:{{color:'#1e2942'}}}},y:{{ticks:{{color:'#64748b'}},grid:{{color:'#1e2942'}},min:0,max:100}}}}}}
+  const chart=echarts.init(el,'dark');
+  chart.setOption({{
+    backgroundColor:'transparent',
+    tooltip:{{trigger:'axis',axisPointer:{{type:'cross',label:{{backgroundColor:'#1e2942'}}}},formatter:function(params){{
+      let s=params[0].axisValue+'<br/>';
+      params.forEach(p=>{{s+=`<span style="color:${{p.color}}">●</span> ${{p.seriesName}}: <b>${{p.value}}%</b><br/>`;}});return s;
+    }}}},
+    legend:{{textStyle:{{color:'#94a3b8',fontSize:11}},top:0}},
+    grid:{{top:32,bottom:52,left:40,right:12}},
+    dataZoom:[
+      {{type:'inside',throttle:50}},
+      {{type:'slider',height:18,bottom:4,borderColor:'#1e2942',fillerColor:'rgba(99,102,241,0.15)',handleStyle:{{color:'#6366f1'}},textStyle:{{color:'#64748b',fontSize:10}}}}
+    ],
+    xAxis:{{type:'category',boundaryGap:false,data:{perf_labels_js},axisLabel:{{color:'#64748b',fontSize:10,interval:'auto',maxInterval:10}},axisLine:{{lineStyle:{{color:'#1e2942'}}}},splitLine:{{show:false}}}},
+    yAxis:{{type:'value',min:0,max:100,axisLabel:{{color:'#64748b',fontSize:10,formatter:function(v){{return v+'%';}}}},splitLine:{{lineStyle:{{color:'#1e2942'}}}}}},
+    series:[
+      {{name:'CPU %',type:'line',data:{perf_cpu_js},lineStyle:{{color:'#f59e0b',width:2}},itemStyle:{{opacity:0}},areaStyle:{{color:'#f59e0b',opacity:0.07}},smooth:0.3,symbol:'none'}},
+      {{name:'RAM %',type:'line',data:{perf_ram_js},lineStyle:{{color:'#6366f1',width:2}},itemStyle:{{opacity:0}},areaStyle:{{color:'#6366f1',opacity:0.07}},smooth:0.3,symbol:'none'}},
+      {{name:'Disk %',type:'line',data:{perf_disk_js},lineStyle:{{color:'#22c55e',width:1.5,type:'dashed'}},itemStyle:{{opacity:0}},areaStyle:{{color:'#22c55e',opacity:0.05}},smooth:0.3,symbol:'none'}}
+    ]
   }});
+  window.addEventListener('resize',()=>chart.resize());
 }})();
 
 // ── Heatmap ──
@@ -1640,12 +1658,17 @@ function filterSecurity(){{
       else if(intensity<0.5)bg='#7f1d1d';
       else if(intensity<0.75)bg='#b91c1c';
       else bg='#ef4444';
-      html+=`<div class="hm-cell" style="background:${{bg}}" title="${{days[d]}} ${{h.toString().padStart(2,'0')}}h : ${{v}} tentatives"></div>`;
+      html+=`<div class="hm-cell" style="background:${{bg}};cursor:${{v>0?'pointer':'default'}}" title="${{days[d]}} ${{h.toString().padStart(2,'0')}}h : ${{v}} tentatives" onclick="hmDrilldown('${{days[d]}}','${{h}}','${{v}}')"></div>`;
     }}
   }}
   html+='</div>';
   container.innerHTML=html;
 }})();
+
+function hmDrilldown(day,hour,count){{
+  if(count=='0')return;
+  showModal('Heatmap drill-down',`${{day}} — ${{String(hour).padStart(2,'0')}}h\n\n${{count}} tentatives SSH enregistrées cette heure.\n\nVoir la Timeline pour le détail par IP.`,'Voir Timeline',function(){{showScreen('timeline');}});
+}}
 
 // ── Carte Leaflet ──
 (function(){{
@@ -1655,7 +1678,7 @@ function filterSecurity(){{
   {geo_markers_js}
 }})();
 
-// ── Sparklines ──
+// ── Sparklines ECharts ──
 (function(){{
   const cpu={perf_cpu_js};
   const ram={perf_ram_js};
@@ -1663,11 +1686,22 @@ function filterSecurity(){{
   function spark(id,data,color){{
     const el=document.getElementById(id);
     if(!el||!data||data.length<2)return;
-    const last8=data.slice(-8);
-    new Chart(el.getContext('2d'),{{
-      type:'line',
-      data:{{labels:last8.map((_,i)=>i),datasets:[{{data:last8,borderColor:color,borderWidth:1.5,pointRadius:0,tension:0.4,fill:true,backgroundColor:'rgba(255,255,255,0.04)'}}]}},
-      options:{{responsive:false,plugins:{{legend:{{display:false}},tooltip:{{enabled:false}}}},scales:{{x:{{display:false}},y:{{display:false,min:0,max:100}}}},animation:false}}
+    const d=data.slice(-8);
+    const chart=echarts.init(el,null,{{renderer:'canvas',width:'auto',height:32}});
+    chart.setOption({{
+      animation:false,
+      grid:{{top:0,bottom:0,left:0,right:0}},
+      xAxis:{{type:'category',show:false,data:d.map((_,i)=>i)}},
+      yAxis:{{type:'value',show:false,min:0,max:100}},
+      series:[{{
+        type:'line',
+        data:d,
+        lineStyle:{{color:color,width:1.5}},
+        itemStyle:{{opacity:0}},
+        areaStyle:{{color:color,opacity:0.08}},
+        smooth:0.4,
+        symbol:'none'
+      }}]
     }});
   }}
   spark('sp-cpu',cpu,'#f59e0b');
