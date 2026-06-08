@@ -581,7 +581,6 @@ tr:last-child td{{border-bottom:none}}
   <div class="nav-item active" onclick="showScreen('overview')"     id="nav-overview">     Vue globale</div>
   <div class="nav-item"        onclick="showScreen('security')"     id="nav-security">     Sécurité</div>
   <div class="nav-item"        onclick="showScreen('performance')"  id="nav-performance">  Performance</div>
-  <div class="nav-item"        onclick="showScreen('ia')"           id="nav-ia">           IA</div>
   <div class="nav-item"        onclick="showScreen('infra')"        id="nav-infra">        Infrastructure</div>
   <div class="topbar-right">
     <span>{svc_badge}</span>
@@ -629,6 +628,11 @@ tr:last-child td{{border-bottom:none}}
   <!-- Statut services -->
   <div class="grid g5" style="margin-bottom:14px">
     {services_cards}
+  </div>
+
+  <!-- Analyse IA -->
+  <div style="margin-bottom:14px">
+    {ai_screen_html}
   </div>
 
   <!-- Uptime + activité 7j -->
@@ -716,13 +720,6 @@ tr:last-child td{{border-bottom:none}}
   </div>
 
 </div><!-- /screen-performance -->
-
-<!-- ════════════════════════════════════ -->
-<!-- ÉCRAN 4 : IA                        -->
-<!-- ════════════════════════════════════ -->
-<div class="screen" id="screen-ia">
-  {ai_screen_html}
-</div><!-- /screen-ia -->
 
 <!-- ════════════════════════════════════ -->
 <!-- ÉCRAN 5 : INFRASTRUCTURE            -->
