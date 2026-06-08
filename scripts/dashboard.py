@@ -495,6 +495,12 @@ def build_html():
           <div style="font-size:10px;color:{'#4ade80' if ok else '#f87171'};margin-top:2px">{status}</div></div>
         </div>"""
 
+    services_compact = ""
+    for label, status in srv_status:
+        ok = status == "active"
+        dot = '<span class="dot-active"></span>' if ok else '<span class="dot-down"></span>'
+        services_compact += f'<div style="display:flex;align-items:center;gap:6px;background:{"#05160e" if ok else "#180808"};border:1px solid {"#166534" if ok else "#7f1d1d"};border-radius:8px;padding:7px 12px">{dot}<span style="font-size:12px;font-weight:500;color:#e2e8f0">{label}</span></div>'
+
     # ── Alertes ──
     alert_banners = ""
     if metrics["disk"] >= CRIT_DISK:
@@ -700,7 +706,7 @@ def build_html():
         )
 
     # ── Bouton rapport ──
-    report_btn = "<button onclick='sendReport()' class='btn-primary' style='font-size:11px;padding:4px 12px'>📋 Rapport maintenant</button>" if ACTIONS_KEY else ""
+    report_btn = "<button onclick='sendReport(this)' class='btn-primary' style='font-size:11px;padding:4px 12px'>📋 Rapport maintenant</button>" if ACTIONS_KEY else ""
 
     # ── Actions JS ──
     actions_js = ""
@@ -708,45 +714,78 @@ def build_html():
         actions_js = f"""
 function getKey(){{
   let k=sessionStorage.getItem('soc_api_key');
-  if(!k){{k=window.prompt('Clé API SOC :')||'';if(k)sessionStorage.setItem('soc_api_key',k);}}
+  if(!k){{
+    showPromptModal('Clé API SOC','Entrez votre clé API...',v=>{{sessionStorage.setItem('soc_api_key',v);}});
+    return null;
+  }}
   return k;
 }}
-async function apiCall(ep,data){{
-  const key=getKey();
-  if(!key)return{{ok:false,error:'Clé manquante'}};
-  const res=await fetch('{ACTIONS_API}'+ep,{{method:'POST',headers:{{'Content-Type':'application/json','X-SOC-Key':key}},body:JSON.stringify(data)}});
-  const r=await res.json();
-  if(res.status===401||res.status===403){{sessionStorage.removeItem('soc_api_key');return{{ok:false,error:'Clé invalide'}};}}
-  return r;
+async function apiCall(ep,data,btn){{
+  let key=sessionStorage.getItem('soc_api_key');
+  if(!key){{
+    showPromptModal('Clé API SOC','Entrez votre clé API...',async v=>{{
+      sessionStorage.setItem('soc_api_key',v);
+      await apiCall(ep,data,btn);
+    }});
+    return null;
+  }}
+  if(btn){{btn.dataset.orig=btn.innerHTML;btn.innerHTML='<span class="spinner"></span>';btn.disabled=true;}}
+  try{{
+    const res=await fetch('{ACTIONS_API}'+ep,{{method:'POST',headers:{{'Content-Type':'application/json','X-SOC-Key':key}},body:JSON.stringify(data)}});
+    const r=await res.json();
+    if(res.status===401||res.status===403){{sessionStorage.removeItem('soc_api_key');showToast('Clé invalide — réessayez',false);return null;}}
+    return r;
+  }}catch(e){{showToast('Erreur réseau : '+e.message,false);return null;}}
+  finally{{if(btn){{btn.innerHTML=btn.dataset.orig;btn.disabled=false;}}}}
 }}
-async function banIP(ip){{if(!confirm(`Bannir ${{ip}} ?`))return;const r=await apiCall('/ban',{{ip}});showToast(r.ok?`✓ ${{ip}} bannie`:`Erreur: ${{r.error}}`,r.ok);}}
-async function unbanIP(ip){{if(!confirm(`Débannir ${{ip}} ?`))return;const r=await apiCall('/unban',{{ip}});showToast(r.ok?`✓ ${{ip}} débannie`:`Erreur: ${{r.error}}`,r.ok);}}
-async function addWhitelist(ip){{
-  const target=ip||window.prompt('IP à whitelister :');
-  if(!target)return;
-  const r=await apiCall('/whitelist/add',{{ip:target}});
-  showToast(r.ok?`✓ ${{target}} whitelistée`:`Erreur: ${{r.error}}`,r.ok);
+function banIP(ip){{
+  showModal('Bannir cette IP',`Bannir ${{ip}} via Fail2Ban ?`,'Bannir',async()=>{{
+    const btn=document.querySelector(`[onclick*="banIP('${{ip}}')"]`);
+    const r=await apiCall('/ban',{{ip}},btn);
+    if(r)showToast(r.ok?`✓ ${{ip}} bannie`:`Erreur: ${{r.error}}`,r.ok);
+  }},true);
 }}
-async function removeWhitelist(ip){{
-  if(!confirm(`Retirer ${{ip}} de la whitelist ?`))return;
-  const r=await apiCall('/whitelist/remove',{{ip}});
-  showToast(r.ok?`✓ ${{ip}} retirée`:`Erreur: ${{r.error}}`,r.ok);
+function unbanIP(ip){{
+  showModal('Débannir cette IP',`Lever le ban sur ${{ip}} ?`,'Débannir',async()=>{{
+    const btn=document.querySelector(`[onclick*="unbanIP('${{ip}}')"]`);
+    const r=await apiCall('/unban',{{ip}},btn);
+    if(r)showToast(r.ok?`✓ ${{ip}} débannie`:`Erreur: ${{r.error}}`,r.ok);
+  }},false);
 }}
-async function sendReport(){{
-  if(!confirm('Générer et envoyer le rapport maintenant ?'))return;
-  showToast('Rapport en cours de génération...', true, 5000);
-  const r=await apiCall('/report',{{}});
-  showToast(r.ok?`✓ ${{r.message}}`:`Erreur: ${{r.error}}`,r.ok, 6000);
+function addWhitelist(ip){{
+  if(ip){{
+    showModal('Whitelister',`Ajouter ${{ip}} à la whitelist Fail2Ban ?`,'Ajouter',async()=>{{
+      const r=await apiCall('/whitelist/add',{{ip}},null);
+      if(r)showToast(r.ok?`✓ ${{ip}} whitelistée`:`Erreur: ${{r.error}}`,r.ok);
+    }},false);
+  }}else{{
+    showPromptModal('Ajouter à la whitelist','Adresse IP à whitelister...',async target=>{{
+      const r=await apiCall('/whitelist/add',{{ip:target}},null);
+      if(r)showToast(r.ok?`✓ ${{target}} whitelistée`:`Erreur: ${{r.error}}`,r.ok);
+    }});
+  }}
 }}
-async function askAI(){{
-  window.pauseRefresh();
-  const p=window.prompt('Question SOC IA :','Quel est le niveau de risque actuel ?');
-  window.resumeRefresh();
-  if(!p)return;
-  showToast('Analyse en cours...',true,5000);
-  const r=await apiCall('/analyze',{{prompt:p}});
-  if(r.ok){{document.getElementById('ai-response-box').style.display='block';document.getElementById('ai-response-text').innerHTML=r.response.replace(/\\n/g,'<br>');}}
-  else showToast('Erreur IA : '+r.error,false);
+function removeWhitelist(ip){{
+  showModal('Retirer de la whitelist',`Supprimer ${{ip}} de la whitelist ?`,'Retirer',async()=>{{
+    const r=await apiCall('/whitelist/remove',{{ip}},null);
+    if(r)showToast(r.ok?`✓ ${{ip}} retirée`:`Erreur: ${{r.error}}`,r.ok);
+  }},true);
+}}
+function sendReport(btn){{
+  showModal('Générer un rapport','Envoyer le rapport SOC par email maintenant ?','Envoyer',async()=>{{
+    const r=await apiCall('/report',{{}},btn);
+    if(r)showToast(r.ok?`✓ ${{r.message}}`:`Erreur: ${{r.error}}`,r.ok,6000);
+  }},false);
+}}
+function askAI(){{
+  showPromptModal('Question à l\\'IA SOC','Ex: Quel est le niveau de risque actuel ?',async p=>{{
+    showToast('Analyse en cours...',true,8000);
+    const r=await apiCall('/analyze',{{prompt:p}},null);
+    if(r&&r.ok){{
+      document.getElementById('ai-response-box').style.display='block';
+      document.getElementById('ai-response-text').innerHTML=r.response.replace(/\\n/g,'<br>');
+    }}else if(r)showToast('Erreur IA : '+r.error,false);
+  }});
 }}"""
 
     html = f"""<!DOCTYPE html>
@@ -759,9 +798,9 @@ async function askAI(){{
 <style>
 /* ── Reset & base ── */
 *{{box-sizing:border-box;margin:0;padding:0}}
-:root{{--bg:#0a0d14;--bg2:#0d1117;--bg3:#111827;--border:#1e2942;--border2:#2d3f5e;--text:#e2e8f0;--muted:#64748b;--dim:#334155;--accent:#6366f1;--accent-light:#a5b4fc;--red:#ef4444;--orange:#f59e0b;--green:#22c55e}}
+:root{{--bg:#0a0d14;--bg2:#0d1117;--bg3:#111827;--border:#1e2942;--border2:#2d3f5e;--text:#e2e8f0;--muted:#64748b;--dim:#475569;--accent:#6366f1;--accent-light:#a5b4fc;--red:#ef4444;--orange:#f59e0b;--green:#22c55e}}
 body{{font-family:-apple-system,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;min-height:100vh;font-variant-numeric:tabular-nums}}
-h2{{font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:14px;font-weight:700}}
+h2{{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);margin-bottom:14px;font-weight:700}}
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar{{width:5px;height:5px}}
@@ -826,6 +865,8 @@ h2{{font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--mut
 table{{width:100%;border-collapse:collapse;font-size:12.5px}}
 td,th{{padding:9px 8px;border-bottom:1px solid var(--border)}}
 th{{color:var(--muted);font-size:10px;text-transform:uppercase;font-weight:700;letter-spacing:.8px}}
+thead th{{position:sticky;top:0;background:var(--bg3);z-index:1}}
+.table-wrap thead th{{position:sticky;top:0;background:var(--bg3);z-index:1}}
 tbody tr{{transition:background .12s}}
 tbody tr:hover{{background:rgba(30,41,66,.4)}}
 tr:last-child td{{border-bottom:none}}
@@ -910,9 +951,54 @@ tr:last-child td{{border-bottom:none}}
   .topbar-brand span{{display:none}}
   .threat-badge{{font-size:10px;padding:4px 8px}}
 }}
+/* ── Modal ── */
+.modal-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:3000;align-items:center;justify-content:center;backdrop-filter:blur(4px)}}
+.modal-overlay.open{{display:flex}}
+.modal-box{{background:#111827;border:1px solid #2d3f5e;border-radius:16px;padding:28px 32px;width:100%;max-width:420px;box-shadow:0 24px 64px rgba(0,0,0,.8);animation:modalIn .2s ease}}
+@keyframes modalIn{{from{{opacity:0;transform:scale(.95)}}to{{opacity:1;transform:scale(1)}}}}
+.modal-title{{font-size:16px;font-weight:700;color:#e2e8f0;margin-bottom:8px}}
+.modal-msg{{font-size:13px;color:#94a3b8;line-height:1.6;margin-bottom:20px}}
+.modal-input{{width:100%;background:#0a0d14;border:1px solid #2d3f5e;color:#e2e8f0;padding:10px 14px;border-radius:8px;font-size:13px;outline:none;margin-bottom:20px;transition:border-color .18s}}
+.modal-input:focus{{border-color:#6366f1;box-shadow:0 0 0 3px rgba(99,102,241,.12)}}
+.modal-actions{{display:flex;gap:10px;justify-content:flex-end}}
+.modal-cancel{{background:transparent;border:1px solid #334155;color:#94a3b8;padding:8px 20px;border-radius:8px;font-size:13px;cursor:pointer;transition:border-color .15s}}
+.modal-cancel:hover{{border-color:#475569;color:#e2e8f0}}
+/* ── Spinner ── */
+.spinner{{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle}}
+@keyframes spin{{to{{transform:rotate(360deg)}}}}
+/* ── Empty state ── */
+.empty-state{{display:flex;flex-direction:column;align-items:center;padding:32px 16px;color:#475569;gap:10px}}
+.empty-state svg{{width:36px;height:36px;stroke:#334155;fill:none;stroke-width:1.5}}
+.empty-state p{{font-size:13px}}
+/* ── Threat hero ── */
+.threat-hero{{border-radius:14px;padding:20px 24px;display:flex;align-items:center;gap:20px;border:1px solid}}
+.threat-hero-score{{font-size:52px;font-weight:800;line-height:1;letter-spacing:-3px}}
+.threat-hero-bar{{height:6px;border-radius:3px;background:#1e2942;margin-top:10px;overflow:hidden}}
+.threat-hero-fill{{height:6px;border-radius:3px;transition:width .8s ease}}
+/* ── Sparkline canvas ── */
+.sparkline{{display:block;width:100%;height:32px;margin-top:6px;opacity:.7}}
+/* ── Age indicator ── */
+.age-indicator{{font-size:11px;color:#475569;padding:0 8px;white-space:nowrap}}
+.age-indicator.fresh{{color:#22c55e}}
+.age-indicator.stale{{color:#f59e0b}}
 </style>
 </head><body>
 <div id="toast"></div>
+
+<!-- ═══ MODAL ═══ -->
+<div class="modal-overlay" id="modal-overlay" onclick="handleOverlayClick(event)">
+  <div class="modal-box">
+    <div class="modal-title" id="modal-title"></div>
+    <div class="modal-msg" id="modal-msg"></div>
+    <div id="modal-input-row" style="display:none">
+      <input class="modal-input" id="modal-input" type="text" autocomplete="off">
+    </div>
+    <div class="modal-actions">
+      <button class="modal-cancel" onclick="closeModal()">Annuler</button>
+      <button id="modal-confirm" class="btn-primary">Confirmer</button>
+    </div>
+  </div>
+</div>
 
 <!-- ═══ NAV DRAWER (mobile) ═══ -->
 <div class="nav-overlay" id="nav-overlay" onclick="closeDrawer()"></div>
@@ -947,6 +1033,7 @@ tr:last-child td{{border-bottom:none}}
       {threat}/100 — {threat_label}
     </div>
     {svc_badge}
+    <span class="age-indicator" id="age-indicator" title="Données générées à {now.strftime('%H:%M:%S')}">⟳ à l'instant</span>
     <span class="topbar-hostname">{hostname} · {now.strftime('%d/%m %H:%M')}</span>
   </div>
 </nav>
@@ -982,27 +1069,75 @@ tr:last-child td{{border-bottom:none}}
 
 <!-- ═══════════ ÉCRAN 1 : VUE GLOBALE ═══════════ -->
 <div class="screen active" id="screen-overview">
-  <div class="grid g6" style="margin-bottom:14px">
-    <div class="card"><div class="stat-big" style="color:{cpu_color}">{metrics['cpu']:.0f}%</div><div class="stat-label">CPU</div><div class="stat-sub">Load {metrics['load1']}</div></div>
-    <div class="card"><div class="stat-big" style="color:{ram_color}">{metrics['ram']:.0f}%</div><div class="stat-label">RAM</div><div class="stat-sub">{metrics['ram_used']}GB / {metrics['ram_total']}GB</div></div>
-    <div class="card"><div class="stat-big" style="color:{disk_color}">{metrics['disk']:.0f}%</div><div class="stat-label">Disque</div><div class="stat-sub">{metrics['disk_used']}GB / {metrics['disk_total']}GB</div></div>
-    <div class="card"><div class="stat-big" style="color:#ef4444">{ban_count}</div><div class="stat-label">IPs bannies</div></div>
-    <div class="card"><div class="stat-big" style="color:#f59e0b">{ssh_total}</div><div class="stat-label">Échecs SSH 24h</div><div class="stat-sub">{len(ssh_fails)} IPs distinctes</div></div>
-    <div class="card"><div class="stat-big" style="color:#ef4444">{bans_today}{trend_html}</div><div class="stat-label">Auto-bans aujourd'hui</div></div>
-  </div>
-  <div class="grid g5" style="margin-bottom:14px">{services_cards}</div>
-  <div style="margin-bottom:14px">{ai_html}</div>
-  <div class="grid g2" style="margin-bottom:14px">
-    <div class="card"><h2>Activité — 7 derniers jours</h2><canvas id="histChart" height="200"></canvas></div>
-    <div class="card">
-      <h2>Métriques système</h2>
-      {gauges_html}
-      <div style="margin-top:12px;padding-top:10px;border-top:1px solid #1e2942;font-size:11px;color:#64748b">
-        Uptime : <span style="color:#94a3b8;font-weight:600">{metrics['uptime_days']}j {metrics['uptime_hours']}h</span>
-        &nbsp;·&nbsp; Docker : <span style="color:#a5b4fc;font-weight:600">{sum(1 for c in containers if 'Up' in c.get('Status',''))}/{len(containers)}</span>
+
+  <!-- Hero : Threat Score + Stats -->
+  <div class="grid g2" style="margin-bottom:14px;grid-template-columns:280px 1fr">
+    <!-- Threat Score Hero -->
+    <div class="threat-hero card" style="background:{threat_bg};border-color:{threat_color};flex-direction:column;align-items:flex-start;gap:6px">
+      <div style="font-size:11px;font-weight:700;color:{threat_color};letter-spacing:1.2px;text-transform:uppercase">Score de menace</div>
+      <div class="threat-hero-score" style="color:{threat_color}">{threat}<span style="font-size:18px;font-weight:400;opacity:.6">/100</span></div>
+      <div style="font-size:13px;font-weight:600;color:{threat_color}">{threat_label}</div>
+      <div class="threat-hero-bar" style="width:100%">
+        <div class="threat-hero-fill" style="width:{threat}%;background:{threat_color}"></div>
+      </div>
+    </div>
+    <!-- Stat cards 2×3 -->
+    <div class="grid g3">
+      <div class="card">
+        <div class="stat-big" style="color:{cpu_color}">{metrics['cpu']:.0f}%</div>
+        <div class="stat-label">CPU</div>
+        <div class="stat-sub">Load {metrics['load1']}</div>
+        <canvas class="sparkline" id="sp-cpu"></canvas>
+      </div>
+      <div class="card">
+        <div class="stat-big" style="color:{ram_color}">{metrics['ram']:.0f}%</div>
+        <div class="stat-label">RAM</div>
+        <div class="stat-sub">{metrics['ram_used']}GB / {metrics['ram_total']}GB</div>
+        <canvas class="sparkline" id="sp-ram"></canvas>
+      </div>
+      <div class="card">
+        <div class="stat-big" style="color:{disk_color}">{metrics['disk']:.0f}%</div>
+        <div class="stat-label">Disque</div>
+        <div class="stat-sub">{metrics['disk_used']}GB / {metrics['disk_total']}GB</div>
+        <canvas class="sparkline" id="sp-disk"></canvas>
+      </div>
+      <div class="card">
+        <div class="stat-big" style="color:#ef4444">{ban_count}</div>
+        <div class="stat-label">IPs bannies</div>
+        <div class="stat-sub">fail2ban actif</div>
+      </div>
+      <div class="card">
+        <div class="stat-big" style="color:#f59e0b">{ssh_total}</div>
+        <div class="stat-label">Échecs SSH 24h</div>
+        <div class="stat-sub">{len(ssh_fails)} IPs distinctes</div>
+      </div>
+      <div class="card">
+        <div class="stat-big" style="color:#ef4444">{bans_today}{trend_html}</div>
+        <div class="stat-label">Auto-bans aujourd'hui</div>
       </div>
     </div>
   </div>
+
+  <!-- Services compacts -->
+  <div class="card" style="margin-bottom:14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+      <h2 style="margin:0">Services</h2>
+      <span style="font-size:11px;color:#475569">Uptime {metrics['uptime_days']}j {metrics['uptime_hours']}h &nbsp;·&nbsp; Docker {sum(1 for c in containers if 'Up' in c.get('Status',''))}/{len(containers)}</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      {services_compact}
+    </div>
+  </div>
+
+  <!-- IA -->
+  <div style="margin-bottom:14px">{ai_html}</div>
+
+  <!-- Graphique 7 jours -->
+  <div class="card" style="margin-bottom:14px">
+    <h2>Activité — 7 derniers jours</h2>
+    <canvas id="histChart" height="160"></canvas>
+  </div>
+
 </div>
 
 <!-- ═══════════ ÉCRAN 2 : SÉCURITÉ ═══════════ -->
@@ -1029,12 +1164,12 @@ tr:last-child td{{border-bottom:none}}
   <div class="grid g2" style="margin-bottom:14px">
     <div class="card">
       <h2>Top IPs attaquantes 24h</h2>
-      {"<div style='color:#475569;font-size:13px;padding:12px 0'>Aucune activité SSH suspecte</div>" if not top_ip_rows else f"<div class='table-wrap' style='max-height:360px;overflow-y:auto'><table id='ip-table'><thead><tr><th>IP</th><th style='text-align:right'>Tentatives</th></tr></thead><tbody>{top_ip_rows}</tbody></table></div>"}
+      {"<div class='empty-state'><svg viewBox='0 0 24 24'><path d='M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z'/></svg><p>Aucune activité SSH suspecte</p></div>" if not top_ip_rows else f"<div class='table-wrap' style='max-height:360px;overflow-y:auto'><table id='ip-table'><thead><tr><th>IP</th><th style='text-align:right'>Tentatives</th></tr></thead><tbody>{top_ip_rows}</tbody></table></div>"}
       {f'<div style="margin-top:14px;padding-top:12px;border-top:1px solid #1e2942"><h2>Connexions légitimes 24h</h2><div class="table-wrap"><table><thead><tr><th></th><th>IP</th><th>Utilisateur</th><th>Heure</th></tr></thead><tbody>{accepted_html}</tbody></table></div></div>' if accepted_html else ""}
     </div>
     <div class="card">
       <h2>Journal d'audit</h2>
-      {"<div style='color:#475569;font-size:13px;padding:12px 0'>Aucune action enregistrée</div>" if not audit_html else f"<div class='table-wrap' style='max-height:360px;overflow-y:auto'><table id='audit-table'><thead><tr><th>Heure</th><th>IP</th><th>Action</th><th style='text-align:right'>Score</th></tr></thead><tbody>{audit_html}</tbody></table></div>"}
+      {"<div class='empty-state'><svg viewBox='0 0 24 24'><path d='M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'/></svg><p>Aucune action enregistrée</p></div>" if not audit_html else f"<div class='table-wrap' style='max-height:360px;overflow-y:auto'><table id='audit-table'><thead><tr><th>Heure</th><th>IP</th><th>Action</th><th style='text-align:right'>Score</th></tr></thead><tbody>{audit_html}</tbody></table></div>"}
     </div>
   </div>
 
@@ -1044,7 +1179,7 @@ tr:last-child td{{border-bottom:none}}
       <h2 style="margin:0">Corrélation par sous-réseau /24</h2>
       <span style="font-size:11px;color:#334155">{len(subnets)} blocs détectés</span>
     </div>
-    {"<div style='color:#475569;font-size:13px;padding:8px 0'>Aucune corrélation détectée</div>" if not subnet_rows else f"<div class='table-wrap'><table><thead><tr><th>Sous-réseau</th><th style='text-align:center'>IPs uniques</th><th style='text-align:right'>Tentatives</th></tr></thead><tbody>{subnet_rows}</tbody></table></div>"}
+    {"<div class='empty-state'><svg viewBox='0 0 24 24'><circle cx='12' cy='12' r='10'/><line x1='12' y1='8' x2='12' y2='12'/><line x1='12' y1='16' x2='12.01' y2='16'/></svg><p>Aucune corrélation détectée</p></div>" if not subnet_rows else f"<div class='table-wrap'><table><thead><tr><th>Sous-réseau</th><th style='text-align:center'>IPs uniques</th><th style='text-align:right'>Tentatives</th></tr></thead><tbody>{subnet_rows}</tbody></table></div>"}
   </div>
 </div>
 
@@ -1083,6 +1218,7 @@ tr:last-child td{{border-bottom:none}}
       </table>
     </div>
   </div>
+  <!-- Note: les jauges État actuel sont uniquement dans Performance -->
   <div class="card">
     <h2>Log détecteur temps réel</h2>
     <div style="background:#0a0d14;border-radius:8px;padding:14px;max-height:280px;overflow-y:auto">
@@ -1116,7 +1252,7 @@ tr:last-child td{{border-bottom:none}}
         <h2 style="margin:0">Whitelist Fail2Ban</h2>
         {'<button onclick="addWhitelist()" class="btn-primary" style="font-size:11px;padding:4px 12px">+ Ajouter IP</button>' if ACTIONS_KEY else ''}
       </div>
-      {"<div style='color:#475569;font-size:13px;padding:8px 0'>Whitelist vide</div>" if not whitelist_html else f"<div class='table-wrap'><table><thead><tr><th>IP / Réseau</th><th></th></tr></thead><tbody>{whitelist_html}</tbody></table></div>"}
+      {"<div class='empty-state'><svg viewBox='0 0 24 24'><path d='M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z'/></svg><p>Whitelist vide</p></div>" if not whitelist_html else f"<div class='table-wrap'><table><thead><tr><th>IP / Réseau</th><th></th></tr></thead><tbody>{whitelist_html}</tbody></table></div>"}
     </div>
     <div class="card">
       <h2>Conteneurs Docker — {len(containers)} · {sum(1 for c in containers if 'Up' in c.get('Status',''))} actifs</h2>
@@ -1129,7 +1265,7 @@ tr:last-child td{{border-bottom:none}}
 
 </div><!-- /main -->
 
-<div style="text-align:center;font-size:10px;color:#1e2942;padding:8px;border-top:1px solid #0d1117">
+<div style="text-align:center;font-size:10px;color:#475569;padding:8px;border-top:1px solid #0d1117">
   ViaDigiTech AI SecOps v6 · {hostname} · 15min · seuils CPU {WARN_CPU}/{CRIT_CPU}% · RAM {WARN_MEM}/{CRIT_MEM}% · Disk {WARN_DISK}/{CRIT_DISK}%
 </div>
 
@@ -1204,6 +1340,53 @@ function showToast(msg,ok,duration=4000){{
   t.style.color=ok?'#86efac':'#fca5a5';t.style.display='block';
   setTimeout(()=>t.style.display='none',duration);
 }}
+
+// ── Système modal ──
+function showModal(title,msg,confirmLabel,onConfirm,danger){{
+  document.getElementById('modal-title').textContent=title;
+  document.getElementById('modal-msg').textContent=msg;
+  document.getElementById('modal-input-row').style.display='none';
+  const btn=document.getElementById('modal-confirm');
+  btn.textContent=confirmLabel;
+  btn.className=danger?'btn-danger':'btn-primary';
+  btn.onclick=()=>{{closeModal();onConfirm();}};
+  document.getElementById('modal-overlay').classList.add('open');
+}}
+function showPromptModal(title,placeholder,onConfirm){{
+  document.getElementById('modal-title').textContent=title;
+  document.getElementById('modal-msg').textContent='';
+  document.getElementById('modal-input-row').style.display='block';
+  const inp=document.getElementById('modal-input');
+  inp.value='';inp.placeholder=placeholder;
+  const btn=document.getElementById('modal-confirm');
+  btn.textContent='Confirmer';btn.className='btn-primary';
+  btn.onclick=()=>{{const v=inp.value.trim();if(!v)return;closeModal();onConfirm(v);}};
+  document.getElementById('modal-overlay').classList.add('open');
+  setTimeout(()=>inp.focus(),80);
+  inp.onkeydown=(e)=>{{if(e.key==='Enter')btn.click();}};
+}}
+function closeModal(){{
+  document.getElementById('modal-overlay').classList.remove('open');
+}}
+function handleOverlayClick(e){{
+  if(e.target===document.getElementById('modal-overlay'))closeModal();
+}}
+
+// ── Indicateur ancienneté ──
+(function(){{
+  const genTime=new Date();
+  const el=document.getElementById('age-indicator');
+  if(!el)return;
+  function update(){{
+    const mins=Math.floor((Date.now()-genTime)/60000);
+    if(mins<1){{el.textContent='⟳ à l\'instant';el.className='age-indicator fresh';}}
+    else if(mins<10){{el.textContent=`⟳ il y a ${{mins}}min`;el.className='age-indicator fresh';}}
+    else if(mins<20){{el.textContent=`⟳ il y a ${{mins}}min`;el.className='age-indicator';}}
+    else{{el.textContent=`⟳ il y a ${{mins}}min`;el.className='age-indicator stale';}}
+  }}
+  update();
+  setInterval(update,30000);
+}})();
 
 // ── Recherche + filtres sécurité ──
 let _filter='all';
@@ -1294,6 +1477,26 @@ function filterSecurity(){{
   window._leafletMap=map;
   L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png',{{subdomains:'abcd',maxZoom:19}}).addTo(map);
   {geo_markers_js}
+}})();
+
+// ── Sparklines ──
+(function(){{
+  const cpu={perf_cpu_js};
+  const ram={perf_ram_js};
+  const disk={perf_disk_js};
+  function spark(id,data,color){{
+    const el=document.getElementById(id);
+    if(!el||!data||data.length<2)return;
+    const last8=data.slice(-8);
+    new Chart(el.getContext('2d'),{{
+      type:'line',
+      data:{{labels:last8.map((_,i)=>i),datasets:[{{data:last8,borderColor:color,borderWidth:1.5,pointRadius:0,tension:0.4,fill:true,backgroundColor:color.replace(')',',.08)').replace('rgb','rgba')}}]}}}},
+      options:{{responsive:false,plugins:{{legend:{{display:false}},tooltip:{{enabled:false}}}},scales:{{x:{{display:false}},y:{{display:false,min:0,max:100}}}},animation:false}}
+    }});
+  }}
+  spark('sp-cpu',cpu,'#f59e0b');
+  spark('sp-ram',ram,'#6366f1');
+  spark('sp-disk',disk,'#22c55e');
 }})();
 
 // ── Actions API ──
