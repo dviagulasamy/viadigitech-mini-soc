@@ -1,0 +1,15 @@
+[Unit]
+Description=ViaDigiTech SOC Actions API
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/secops
+EnvironmentFile=/etc/soc-actions.env
+ExecStart=/usr/bin/python3 /home/ubuntu/secops/actions.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

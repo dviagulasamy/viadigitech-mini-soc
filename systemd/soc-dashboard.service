@@ -1,0 +1,13 @@
+[Unit]
+Description=ViaDigiTech SOC Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/var/www/html/viadigitech-reports
+ExecStart=/usr/bin/python3 -m http.server 8088 --bind 0.0.0.0
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
