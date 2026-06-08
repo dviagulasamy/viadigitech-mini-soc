@@ -20,8 +20,8 @@ from email.mime.text import MIMEText
 # ─────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────
-MAIL_FROM        = os.environ.get("SOC_MAIL_FROM", "secops@localhost")
-MAIL_TO          = os.environ.get("SOC_MAIL_TO", "admin@example.com").split(",")
+MAIL_FROM        = os.environ.get("SOC_MAIL_FROM", "secops@viadigitech.com")
+MAIL_TO          = os.environ.get("SOC_MAIL_TO", "david@viadigitech.com").split(",")
 ABUSEIPDB_KEY    = os.environ.get("ABUSEIPDB_KEY", "")
 AUTH_LOG         = "/var/log/auth.log"
 STATE_FILE       = "/tmp/soc_detector_state.txt"
