@@ -2,12 +2,13 @@
 """
 ViaDigiTech SOC — Dashboard HTML temps réel
 Exécuté toutes les 15 min via cron, servi par Nginx Proxy Manager.
-v3 : onglets IA, graphique 7 jours, boutons d'action opérationnels.
+v4 : alertes banner, statut services, historique CPU/RAM 24h, carte géo attaques.
 """
 
 import os
 import json
 import subprocess
+import urllib.request
 from datetime import datetime, timedelta
 from collections import Counter, defaultdict
 import re
@@ -18,6 +19,8 @@ AUDIT_LOG    = "/home/ubuntu/secops/audit_actions.csv"
 DETECTOR_LOG = "/home/ubuntu/secops/detector.log"
 AUTH_LOG     = "/var/log/auth.log"
 AI_SUMMARY   = "/home/ubuntu/secops/last_ai_summary.json"
+METRICS_CSV  = "/home/ubuntu/secops/metrics_history.csv"
+GEO_CACHE    = "/home/ubuntu/secops/geo_cache.json"
 SSH_LOG_LINES = 8000
 
 # Seuils couleur unifiés
@@ -25,9 +28,9 @@ WARN_CPU, CRIT_CPU   = 70, 85
 WARN_MEM, CRIT_MEM   = 75, 88
 WARN_DISK, CRIT_DISK = 75, 88
 
-# URL actions API (Caddy reverse proxy → actions.py:8022)
+# URL actions API (NPM reverse proxy → actions.py:8022)
 ACTIONS_API  = "/action"
-# Clé API embarquée pour le dashboard (lue depuis env, fallback vide = désactivé)
+# Clé API lue depuis env — non embarquée dans le HTML (sessionStorage côté client)
 ACTIONS_KEY  = os.environ.get("SOC_ACTIONS_KEY", "")
 
 os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
@@ -120,7 +123,6 @@ def get_audit_recent(n=15):
     return rows
 
 def get_bans_history(days=7):
-    """Retourne 2 listes [labels, counts] pour les 7 derniers jours depuis audit_actions.csv."""
     labels, bans, watches = [], [], []
     today = datetime.now().date()
     day_bans    = defaultdict(int)
@@ -171,6 +173,112 @@ def get_ai_summary():
     except:
         return None
 
+# ── NOUVEAU : historique CPU/RAM/Disk ──
+
+def append_metrics_history(metrics):
+    """Ajoute une mesure au CSV et purge les entrées > 7 jours."""
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    new_line = f"{now_str},{metrics['cpu']:.1f},{metrics['ram']:.1f},{metrics['disk']:.1f}\n"
+    cutoff = datetime.now() - timedelta(days=7)
+    rows = []
+    if os.path.exists(METRICS_CSV):
+        with open(METRICS_CSV) as f:
+            for l in f:
+                if l.startswith("timestamp"): continue
+                try:
+                    ts = datetime.strptime(l[:16], "%Y-%m-%d %H:%M")
+                    if ts >= cutoff:
+                        rows.append(l)
+                except:
+                    pass
+    rows.append(new_line)
+    with open(METRICS_CSV, "w") as f:
+        f.write("timestamp,cpu,ram,disk\n")
+        f.writelines(rows)
+
+def get_metrics_history(hours=24):
+    """Retourne labels + séries CPU/RAM/Disk sur les N dernières heures."""
+    if not os.path.exists(METRICS_CSV):
+        return [], [], [], []
+    cutoff = datetime.now() - timedelta(hours=hours)
+    labels, cpu_v, ram_v, disk_v = [], [], [], []
+    with open(METRICS_CSV) as f:
+        for line in f:
+            if line.startswith("timestamp"): continue
+            parts = line.strip().split(",")
+            if len(parts) < 4: continue
+            try:
+                ts = datetime.strptime(parts[0], "%Y-%m-%d %H:%M")
+                if ts < cutoff: continue
+                labels.append(ts.strftime("%H:%M"))
+                cpu_v.append(float(parts[1]))
+                ram_v.append(float(parts[2]))
+                disk_v.append(float(parts[3]))
+            except:
+                pass
+    return labels, cpu_v, ram_v, disk_v
+
+# ── NOUVEAU : statut des services ──
+
+def get_service_status():
+    services = [
+        ("fail2ban",     "Fail2Ban"),
+        ("postfix",      "Postfix"),
+        ("soc-actions",  "SOC Actions"),
+        ("soc-dashboard","SOC Dashboard"),
+        ("ollama",       "Ollama"),
+    ]
+    result = []
+    for svc, label in services:
+        status = run(f"systemctl is-active {svc} 2>/dev/null").strip()
+        result.append((label, status))
+    return result
+
+# ── NOUVEAU : géolocalisation des IP attaquantes ──
+
+def get_geo_data(ips):
+    """Géolocalise les IPs via ip-api.com avec cache JSON local."""
+    cache = {}
+    if os.path.exists(GEO_CACHE):
+        try:
+            with open(GEO_CACHE) as f:
+                cache = json.load(f)
+        except:
+            pass
+
+    to_lookup = [ip for ip in ips if ip not in cache][:20]
+    if to_lookup:
+        try:
+            payload = json.dumps([
+                {"query": ip, "fields": "query,lat,lon,country,city,countryCode,status"}
+                for ip in to_lookup
+            ]).encode()
+            req = urllib.request.Request(
+                "http://ip-api.com/batch",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                for item in json.loads(resp.read()):
+                    if item.get("status") != "fail":
+                        cache[item["query"]] = {
+                            "lat": item.get("lat", 0),
+                            "lon": item.get("lon", 0),
+                            "country": item.get("country", "?"),
+                            "city": item.get("city", ""),
+                            "cc": item.get("countryCode", "")
+                        }
+        except:
+            pass
+        try:
+            with open(GEO_CACHE, "w") as f:
+                json.dump(cache, f)
+        except:
+            pass
+
+    return {ip: cache[ip] for ip in ips if ip in cache}
+
 # ─────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────
@@ -195,7 +303,6 @@ def gauge(label, val, unit="%", warn=75, crit=88, sub=""):
     </div>"""
 
 def safe_js(text):
-    """Échappe le texte pour injection dans un littéral JS."""
     return text.replace("\\", "\\\\").replace("`", "\\`").replace("${", "\\${")
 
 # ─────────────────────────────────────────
@@ -205,6 +312,7 @@ def safe_js(text):
 def build_html():
     now          = datetime.now()
     metrics      = get_metrics()
+    append_metrics_history(metrics)
     ban_count, banned_ips = get_banned_ips()
     ssh_total, ssh_fails, accepted = get_ssh_stats(24)
     bans_today   = get_bans_today()
@@ -214,10 +322,47 @@ def build_html():
     ai_summary   = get_ai_summary()
     hostname     = os.uname().nodename
     hist_labels, hist_bans, hist_watches = get_bans_history(7)
+    srv_status   = get_service_status()
+    perf_labels, perf_cpu, perf_ram, perf_disk = get_metrics_history(24)
 
-    # Tendance bans : aujourd'hui vs hier
+    # Géolocalisation top 20 IPs attaquantes
+    top_ips = [ip for ip, _ in ssh_fails.most_common(20)]
+    geo_data = get_geo_data(top_ips)
+
+    # ── Bannières d'alerte ──
+    alert_banners = ""
+    if metrics["disk"] >= CRIT_DISK:
+        alert_banners += f"""<div style="background:#450a0a;border:1px solid #dc2626;border-radius:8px;padding:10px 16px;margin-bottom:10px;display:flex;align-items:center;gap:10px">
+          <span style="font-size:18px">🔴</span>
+          <span style="font-weight:600;color:#fca5a5">DISQUE CRITIQUE — {metrics['disk']:.1f}% utilisé ({metrics['disk_used']}GB / {metrics['disk_total']}GB)</span>
+        </div>"""
+    elif metrics["disk"] >= WARN_DISK:
+        alert_banners += f"""<div style="background:#451a03;border:1px solid #d97706;border-radius:8px;padding:10px 16px;margin-bottom:10px;display:flex;align-items:center;gap:10px">
+          <span style="font-size:18px">🟠</span>
+          <span style="font-weight:600;color:#fcd34d">DISQUE AVERTISSEMENT — {metrics['disk']:.1f}% utilisé</span>
+        </div>"""
+    if metrics["ram"] >= CRIT_MEM:
+        alert_banners += f"""<div style="background:#450a0a;border:1px solid #dc2626;border-radius:8px;padding:10px 16px;margin-bottom:10px;display:flex;align-items:center;gap:10px">
+          <span style="font-size:18px">🔴</span>
+          <span style="font-weight:600;color:#fca5a5">RAM CRITIQUE — {metrics['ram']:.1f}% ({metrics['ram_used']}GB / {metrics['ram_total']}GB)</span>
+        </div>"""
+
+    # ── Statut services ──
+    services_html = ""
+    for label, status in srv_status:
+        ok = status == "active"
+        dot_color = "#22c55e" if ok else "#ef4444"
+        bg = "#0d2318" if ok else "#2d0a0a"
+        services_html += f"""<div style="background:{bg};border:1px solid {'#166534' if ok else '#7f1d1d'};border-radius:8px;padding:8px 12px;display:flex;align-items:center;gap:8px">
+          <span style="color:{dot_color};font-size:14px">●</span>
+          <div>
+            <div style="font-size:11px;font-weight:600;color:#e2e8f0">{label}</div>
+            <div style="font-size:10px;color:{dot_color}">{status}</div>
+          </div>
+        </div>"""
+
+    # ── Tendance bans ──
     trend_val  = hist_bans[-1] - hist_bans[-2] if len(hist_bans) >= 2 else 0
-    trend_html = ""
     if trend_val > 0:
         trend_html = f"<span style='color:#ef4444;font-size:11px;margin-left:6px'>↑ +{trend_val} vs hier</span>"
     elif trend_val < 0:
@@ -242,10 +387,12 @@ def build_html():
     top_ip_rows = ""
     for ip, count in ssh_fails.most_common(10):
         is_banned = "🔴" if ip in banned_ips else "🟡"
+        geo = geo_data.get(ip, {})
+        country_flag = f"<span style='color:#64748b;font-size:10px;margin-left:6px'>{geo.get('cc','')} {geo.get('city','')}</span>" if geo else ""
         action_btn = ""
         if ACTIONS_KEY:
             action_btn = f"""<button onclick="banIP('{ip}')" style="background:#7f1d1d;border:none;color:#fca5a5;padding:2px 8px;border-radius:4px;font-size:10px;cursor:pointer;margin-left:4px">Bannir</button>"""
-        top_ip_rows += f"<tr><td style='font-family:monospace;font-size:12px'>{is_banned} {ip}{action_btn}</td><td style='text-align:right;font-weight:700;color:#ef4444'>{count}</td></tr>"
+        top_ip_rows += f"<tr><td style='font-family:monospace;font-size:12px'>{is_banned} {ip}{country_flag}{action_btn}</td><td style='text-align:right;font-weight:700;color:#ef4444'>{count}</td></tr>"
 
     # ── Connexions légitimes ──
     accepted_html = ""
@@ -299,10 +446,6 @@ def build_html():
         def fmt_ai(text):
             return text.replace("\n", "<br>").replace("  ", "&nbsp;&nbsp;")
 
-        ai_morning_html  = fmt_ai(ai_summary.get("morning", "Non disponible"))
-        ai_security_html = fmt_ai(ai_summary.get("security", "Non disponible"))
-        ai_perf_html     = fmt_ai(ai_summary.get("perf", "Non disponible"))
-
         ai_tabs_html = f"""
 <div class="card" style="border-left:3px solid #818cf8;margin-bottom:14px">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px">
@@ -315,13 +458,13 @@ def build_html():
     <button onclick="showTab('tab-perf')" id="btn-perf" class="tab-btn">Performance</button>
   </div>
   <div id="tab-morning" class="tab-pane" style="background:#0a0d14;border:1px solid #1e2942;border-radius:8px;padding:14px;font-size:13px;line-height:1.75;color:#e2e8f0">
-    {ai_morning_html}
+    {fmt_ai(ai_summary.get("morning","Non disponible"))}
   </div>
   <div id="tab-security" class="tab-pane" style="display:none;background:#0a0d14;border:1px solid #1e2942;border-radius:8px;padding:14px;font-size:13px;line-height:1.75;color:#e2e8f0">
-    {ai_security_html}
+    {fmt_ai(ai_summary.get("security","Non disponible"))}
   </div>
   <div id="tab-perf" class="tab-pane" style="display:none;background:#0a0d14;border:1px solid #1e2942;border-radius:8px;padding:14px;font-size:13px;line-height:1.75;color:#e2e8f0">
-    {ai_perf_html}
+    {fmt_ai(ai_summary.get("perf","Non disponible"))}
   </div>
 </div>"""
     else:
@@ -330,17 +473,32 @@ def build_html():
           <div style="color:#475569;font-size:13px;padding:10px 0">Rapport IA non disponible — sera généré demain à 7h</div>
         </div>"""
 
-    # ── Graphique 7 jours ──
-    hist_labels_js = json.dumps(hist_labels)
-    hist_bans_js   = json.dumps(hist_bans)
-    hist_watch_js  = json.dumps(hist_watches)
+    # ── Données JS ──
+    hist_labels_js  = json.dumps(hist_labels)
+    hist_bans_js    = json.dumps(hist_bans)
+    hist_watch_js   = json.dumps(hist_watches)
+    perf_labels_js  = json.dumps(perf_labels)
+    perf_cpu_js     = json.dumps(perf_cpu)
+    perf_ram_js     = json.dumps(perf_ram)
+    perf_disk_js    = json.dumps(perf_disk)
+
+    # Marqueurs Leaflet pour les IPs attaquantes
+    geo_markers_js = ""
+    for ip, count in ssh_fails.most_common(20):
+        geo = geo_data.get(ip)
+        if not geo: continue
+        lat, lon = geo["lat"], geo["lon"]
+        country  = geo.get("country", "?").replace("'", "\\'")
+        city     = geo.get("city", "").replace("'", "\\'")
+        radius   = min(5 + count // 10, 20)
+        geo_markers_js += f"L.circleMarker([{lat},{lon}],{{radius:{radius},color:'#ef4444',fillColor:'#ef4444',fillOpacity:0.6,weight:1}}).addTo(map).bindPopup('<b>{ip}</b><br>{country} {city}<br>{count} tentatives');\n"
 
     # Couleurs stat cards
     cpu_color  = gc(metrics["cpu"],  WARN_CPU,  CRIT_CPU)
     ram_color  = gc(metrics["ram"],  WARN_MEM,  CRIT_MEM)
     disk_color = gc(metrics["disk"], WARN_DISK, CRIT_DISK)
 
-    # JS actions (seulement si clé configurée côté serveur)
+    # JS actions
     actions_js = ""
     if ACTIONS_KEY:
         actions_js = f"""
@@ -412,6 +570,8 @@ function showToast(msg, ok, duration=4000) {{
 <meta name="dashboard-refresh" content="300">
 <title>SOC Dashboard — {hostname}</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   * {{ box-sizing:border-box; margin:0; padding:0 }}
   body {{ font-family:-apple-system,'Segoe UI',sans-serif; background:#0a0d14; color:#e2e8f0; padding:16px }}
@@ -420,9 +580,10 @@ function showToast(msg, ok, duration=4000) {{
   .g2 {{ grid-template-columns:repeat(2,1fr) }}
   .g3 {{ grid-template-columns:repeat(3,1fr) }}
   .g4 {{ grid-template-columns:repeat(4,1fr) }}
+  .g5 {{ grid-template-columns:repeat(5,1fr) }}
   .g6 {{ grid-template-columns:repeat(6,1fr) }}
-  @media(max-width:900px){{ .g2,.g3,.g4,.g6 {{ grid-template-columns:1fr }} }}
-  @media(min-width:901px) and (max-width:1200px){{ .g6 {{ grid-template-columns:repeat(3,1fr) }} }}
+  @media(max-width:900px){{ .g2,.g3,.g4,.g5,.g6 {{ grid-template-columns:1fr }} }}
+  @media(min-width:901px) and (max-width:1200px){{ .g6 {{ grid-template-columns:repeat(3,1fr) }} .g5 {{ grid-template-columns:repeat(3,1fr) }} }}
   .card {{ background:#111827; border:1px solid #1e2942; border-radius:12px; padding:16px }}
   .stat-big {{ font-size:28px; font-weight:700; line-height:1 }}
   .stat-label {{ font-size:11px; color:#64748b; margin-top:4px }}
@@ -439,6 +600,9 @@ function showToast(msg, ok, duration=4000) {{
   .tab-active {{ background:#1e1b4b; border-color:#4338ca; color:#a5b4fc; font-weight:600 }}
   #toast {{ display:none; position:fixed; bottom:20px; right:20px; padding:10px 18px; border-radius:8px; font-size:13px; font-weight:600; z-index:9999; box-shadow:0 4px 12px rgba(0,0,0,.5) }}
   #ai-response-box {{ display:none; margin-top:12px; background:#0a0d14; border:1px solid #312e81; border-radius:8px; padding:14px; font-size:13px; line-height:1.75; color:#e2e8f0 }}
+  #geomap {{ height:260px; border-radius:8px; background:#0a0d14 }}
+  .leaflet-tile {{ filter:brightness(0.6) saturate(0.4) }}
+  .leaflet-container {{ background:#0a0d14 }}
 </style>
 </head><body>
 
@@ -466,6 +630,14 @@ function showToast(msg, ok, duration=4000) {{
       </div>
     </div>
   </div>
+</div>
+
+<!-- ALERTES BANNIÈRES -->
+{alert_banners}
+
+<!-- STATUT SERVICES -->
+<div class="grid g5" style="margin-bottom:14px">
+  {services_html}
 </div>
 
 <!-- STAT CARDS -->
@@ -508,6 +680,19 @@ function showToast(msg, ok, duration=4000) {{
 <div id="ai-response-box" style="margin-bottom:14px">
   <h2 style="margin-bottom:8px">⚡ Réponse IA temps réel</h2>
   <div id="ai-response-text"></div>
+</div>
+
+<!-- CPU/RAM 24H + CARTE GÉO -->
+<div class="grid g2" style="margin-bottom:14px">
+  <div class="card">
+    <h2>CPU / RAM / Disque — 24 dernières heures</h2>
+    {'<canvas id="perfChart" height="200"></canvas>' if perf_labels else '<div style="color:#475569;font-size:13px;padding:20px 0;text-align:center">Historique en cours de constitution — disponible dans 15 min</div>'}
+  </div>
+  <div class="card">
+    <h2>Carte des attaques — origines géographiques</h2>
+    <div id="geomap"></div>
+    {'<div style="font-size:10px;color:#334155;margin-top:6px;text-align:right">ip-api.com · ' + str(len(geo_data)) + ' IPs géolocalisées</div>' if geo_data else '<div style="color:#475569;font-size:13px;padding-top:8px">Aucune IP à géolocaliser</div>'}
+  </div>
 </div>
 
 <!-- GRAPHIQUE 7 JOURS + MÉTRIQUES -->
@@ -553,11 +738,11 @@ function showToast(msg, ok, duration=4000) {{
 
 <!-- FOOTER -->
 <div style="text-align:center;font-size:11px;color:#1e2942;padding:10px;border-top:1px solid #111827;margin-top:4px">
-  ViaDigiTech AI SecOps · {hostname} · dashboard 15min · seuils CPU {WARN_CPU}/{CRIT_CPU}% · RAM {WARN_MEM}/{CRIT_MEM}% · Disk {WARN_DISK}/{CRIT_DISK}%
+  ViaDigiTech AI SecOps v4 · {hostname} · dashboard 15min · seuils CPU {WARN_CPU}/{CRIT_CPU}% · RAM {WARN_MEM}/{CRIT_MEM}% · Disk {WARN_DISK}/{CRIT_DISK}%
 </div>
 
 <script>
-// ── Refresh intelligent (pause si prompt IA ouvert) ──
+// ── Refresh intelligent ──
 (function() {{
   let lastActivity = Date.now();
   let paused = false;
@@ -590,36 +775,50 @@ function showTab(id) {{
     data: {{
       labels: {hist_labels_js},
       datasets: [
-        {{
-          label: 'Bans auto',
-          data: {hist_bans_js},
-          backgroundColor: 'rgba(239,68,68,0.7)',
-          borderColor: '#ef4444',
-          borderWidth: 1,
-          borderRadius: 4,
-        }},
-        {{
-          label: 'Surveillés',
-          data: {hist_watch_js},
-          backgroundColor: 'rgba(99,102,241,0.5)',
-          borderColor: '#6366f1',
-          borderWidth: 1,
-          borderRadius: 4,
-        }}
+        {{ label:'Bans auto', data:{hist_bans_js}, backgroundColor:'rgba(239,68,68,0.7)', borderColor:'#ef4444', borderWidth:1, borderRadius:4 }},
+        {{ label:'Surveillés', data:{hist_watch_js}, backgroundColor:'rgba(99,102,241,0.5)', borderColor:'#6366f1', borderWidth:1, borderRadius:4 }}
       ]
     }},
     options: {{
-      responsive: true,
-      plugins: {{
-        legend: {{ labels: {{ color: '#94a3b8', font: {{ size: 11 }} }} }},
-        tooltip: {{ mode: 'index' }}
-      }},
-      scales: {{
-        x: {{ ticks: {{ color: '#64748b' }}, grid: {{ color: '#1e2942' }} }},
-        y: {{ ticks: {{ color: '#64748b' }}, grid: {{ color: '#1e2942' }}, beginAtZero: true }}
+      responsive:true,
+      plugins:{{ legend:{{ labels:{{ color:'#94a3b8', font:{{ size:11 }} }} }}, tooltip:{{ mode:'index' }} }},
+      scales:{{ x:{{ ticks:{{ color:'#64748b' }}, grid:{{ color:'#1e2942' }} }}, y:{{ ticks:{{ color:'#64748b' }}, grid:{{ color:'#1e2942' }}, beginAtZero:true }} }}
+    }}
+  }});
+}})();
+
+// ── Graphique CPU/RAM/Disk 24h ──
+(function() {{
+  const el = document.getElementById('perfChart');
+  if (!el) return;
+  new Chart(el.getContext('2d'), {{
+    type: 'line',
+    data: {{
+      labels: {perf_labels_js},
+      datasets: [
+        {{ label:'CPU %', data:{perf_cpu_js}, borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,0.08)', borderWidth:2, pointRadius:0, tension:0.3, fill:true }},
+        {{ label:'RAM %', data:{perf_ram_js}, borderColor:'#6366f1', backgroundColor:'rgba(99,102,241,0.08)', borderWidth:2, pointRadius:0, tension:0.3, fill:true }},
+        {{ label:'Disk %', data:{perf_disk_js}, borderColor:'#22c55e', backgroundColor:'rgba(34,197,94,0.06)', borderWidth:1.5, pointRadius:0, tension:0.3, borderDash:[4,4], fill:true }}
+      ]
+    }},
+    options: {{
+      responsive:true,
+      plugins:{{ legend:{{ labels:{{ color:'#94a3b8', font:{{ size:11 }} }} }}, tooltip:{{ mode:'index', intersect:false }} }},
+      scales:{{
+        x:{{ ticks:{{ color:'#64748b', maxTicksLimit:8 }}, grid:{{ color:'#1e2942' }} }},
+        y:{{ ticks:{{ color:'#64748b' }}, grid:{{ color:'#1e2942' }}, min:0, max:100 }}
       }}
     }}
   }});
+}})();
+
+// ── Carte Leaflet ──
+(function() {{
+  const map = L.map('geomap', {{ zoomControl:true, attributionControl:false }}).setView([20, 10], 1);
+  L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+    subdomains:'abcd', maxZoom:19
+  }}).addTo(map);
+  {geo_markers_js}
 }})();
 
 // ── Actions API ──
@@ -637,4 +836,4 @@ if __name__ == "__main__":
     html = build_html()
     with open(OUTPUT_FILE, "w") as f:
         f.write(html)
-    print(f"[{datetime.now():%H:%M:%S}] Dashboard v3 généré → {OUTPUT_FILE}")
+    print(f"[{datetime.now():%H:%M:%S}] Dashboard v4 généré → {OUTPUT_FILE}")
