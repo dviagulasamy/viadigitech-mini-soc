@@ -2,7 +2,7 @@
 """
 ViaDigiTech SOC — Dashboard HTML temps réel
 Exécuté toutes les 15 min via cron, servi par Nginx Proxy Manager.
-v5 : navigation multi-écrans (Overview / Sécurité / Performance / IA / Infrastructure).
+v6 : score menace, timeline, heatmap, corrélation /24, whitelist, notifications, rapport ad-hoc.
 """
 
 import os
@@ -21,7 +21,7 @@ AUTH_LOG     = "/var/log/auth.log"
 AI_SUMMARY   = "/home/ubuntu/secops/last_ai_summary.json"
 METRICS_CSV  = "/home/ubuntu/secops/metrics_history.csv"
 GEO_CACHE    = "/home/ubuntu/secops/geo_cache.json"
-SSH_LOG_LINES = 8000
+SSH_LOG_LINES = 12000
 
 WARN_CPU, CRIT_CPU   = 70, 85
 WARN_MEM, CRIT_MEM   = 75, 88
@@ -95,7 +95,7 @@ def get_ssh_stats(hours=24):
             ip  = re.search(r"from (\d+\.\d+\.\d+\.\d+)", line)
             usr = re.search(r"for (\S+) from", line)
             if ip and usr and not ip.group(1).startswith("10."):
-                accepted.append({"user": usr.group(1), "ip": ip.group(1)})
+                accepted.append({"user": usr.group(1), "ip": ip.group(1), "ts": ts.strftime("%H:%M")})
     return total, fails, accepted
 
 def get_bans_today():
@@ -262,6 +262,167 @@ def get_geo_data(ips):
             pass
     return {ip: cache[ip] for ip in ips if ip in cache}
 
+# ── NOUVELLES FONCTIONS ──
+
+def compute_threat_score(metrics, ssh_total, bans_today, ban_count):
+    """Calcule un score de menace 0-100."""
+    score = 0
+    score += min(ssh_total / 300 * 30, 30)
+    score += min(bans_today / 15 * 25, 25)
+    score += min(ban_count  / 40 * 15, 15)
+    if metrics["cpu"] >= CRIT_CPU:
+        score += 15
+    elif metrics["cpu"] >= WARN_CPU:
+        score += 7
+    if metrics["disk"] >= CRIT_DISK:
+        score += 15
+    elif metrics["disk"] >= WARN_DISK:
+        score += 7
+    return min(int(score), 100)
+
+def get_timeline_events(hours=24):
+    """Fusionne les événements de toutes les sources en une timeline triée."""
+    events = []
+    since = datetime.now() - timedelta(hours=hours)
+    year  = datetime.now().year
+
+    # Audit log
+    if os.path.exists(AUDIT_LOG):
+        with open(AUDIT_LOG) as f:
+            for line in f:
+                if line.startswith("timestamp"): continue
+                parts = line.strip().split(",", 4)
+                if len(parts) < 4: continue
+                try:
+                    ts = datetime.strptime(parts[0][:19], "%Y-%m-%d %H:%M:%S")
+                    if ts < since: continue
+                    action = parts[2]
+                    if "BAN" in action:
+                        etype, icon, color = "ban",     "🔴", "#ef4444"
+                    elif "UNBAN" in action:
+                        etype, icon, color = "unban",   "🟢", "#22c55e"
+                    elif "OLLAMA" in action or "SURVEILLE" in action:
+                        etype, icon, color = "analyze", "🟣", "#a78bfa"
+                    else:
+                        etype, icon, color = "action",  "⚪", "#64748b"
+                    events.append({
+                        "ts": ts, "label": ts.strftime("%H:%M"),
+                        "type": etype, "icon": icon, "color": color,
+                        "title": f"{action} — {parts[1]}",
+                        "detail": f"Score : {parts[3]}%" if len(parts) > 3 else ""
+                    })
+                except:
+                    pass
+
+    # Auth log : connexions acceptées + première tentative par IP par heure
+    if os.path.exists(AUTH_LOG):
+        seen_fail_ip_hour = set()
+        with open(AUTH_LOG, errors="ignore") as f:
+            lines = f.readlines()[-SSH_LOG_LINES:]
+        for line in lines:
+            try:
+                ts = datetime.strptime(line[:15] + f" {year}", "%b %d %H:%M:%S %Y")
+                if ts < since: continue
+                if "Accepted" in line:
+                    ip  = re.search(r"from (\d+\.\d+\.\d+\.\d+)", line)
+                    usr = re.search(r"for (\S+) from", line)
+                    if ip and usr and not ip.group(1).startswith("10."):
+                        events.append({
+                            "ts": ts, "label": ts.strftime("%H:%M"),
+                            "type": "ssh_ok", "icon": "✅", "color": "#22c55e",
+                            "title": f"Connexion SSH acceptée — {ip.group(1)}",
+                            "detail": f"Utilisateur : {usr.group(1)}"
+                        })
+                elif "Failed password" in line or "Invalid user" in line:
+                    ip = re.search(r"from\s+(\d+\.\d+\.\d+\.\d+)", line)
+                    if ip:
+                        key = f"{ip.group(1)}-{ts.strftime('%Y-%m-%d %H')}"
+                        if key not in seen_fail_ip_hour:
+                            seen_fail_ip_hour.add(key)
+                            events.append({
+                                "ts": ts, "label": ts.strftime("%H:%M"),
+                                "type": "ssh_fail", "icon": "⚠️", "color": "#f59e0b",
+                                "title": f"Tentatives SSH — {ip.group(1)}",
+                                "detail": ""
+                            })
+            except:
+                pass
+
+    # Detector log : lignes d'alerte
+    if os.path.exists(DETECTOR_LOG):
+        with open(DETECTOR_LOG) as f:
+            for line in f.readlines()[-50:]:
+                line = line.strip()
+                if "alerte(s)" in line or "AutoBan" in line:
+                    try:
+                        hm = re.search(r"\[(\d{2}:\d{2}:\d{2})\]", line)
+                        if not hm: continue
+                        today = datetime.now().strftime("%Y-%m-%d")
+                        ts = datetime.strptime(f"{today} {hm.group(1)}", "%Y-%m-%d %H:%M:%S")
+                        if ts < since: continue
+                        events.append({
+                            "ts": ts, "label": ts.strftime("%H:%M"),
+                            "type": "alert", "icon": "🚨", "color": "#ef4444",
+                            "title": "Alerte SOC détectée",
+                            "detail": line[10:80]
+                        })
+                    except:
+                        pass
+
+    events.sort(key=lambda e: e["ts"], reverse=True)
+    return events[:120]
+
+def get_attack_heatmap(days=7):
+    """Retourne une matrice 7×24 des tentatives SSH par jour/heure."""
+    matrix = [[0]*24 for _ in range(days)]
+    today  = datetime.now().date()
+    year   = datetime.now().year
+    if not os.path.exists(AUTH_LOG):
+        return matrix, []
+    with open(AUTH_LOG, errors="ignore") as f:
+        lines = f.readlines()[-SSH_LOG_LINES:]
+    cutoff = datetime.now() - timedelta(days=days)
+    for line in lines:
+        if "Failed password" not in line and "Invalid user" not in line:
+            continue
+        try:
+            ts = datetime.strptime(line[:15] + f" {year}", "%b %d %H:%M:%S %Y")
+            if ts < cutoff: continue
+            day_idx = (today - ts.date()).days
+            if 0 <= day_idx < days:
+                matrix[days - 1 - day_idx][ts.hour] += 1
+        except:
+            pass
+    day_labels = [(today - timedelta(days=i)).strftime("%d/%m") for i in range(days-1, -1, -1)]
+    return matrix, day_labels
+
+def get_subnet_correlation(ssh_fails):
+    """Regroupe les IPs attaquantes par sous-réseau /24."""
+    subnet_ips   = defaultdict(set)
+    subnet_count = defaultdict(int)
+    for ip, count in ssh_fails.items():
+        parts = ip.split(".")
+        if len(parts) == 4:
+            subnet = f"{parts[0]}.{parts[1]}.{parts[2]}.0/24"
+            subnet_ips[subnet].add(ip)
+            subnet_count[subnet] += count
+    result = sorted(
+        [{"subnet": s, "ips": len(subnet_ips[s]), "attempts": subnet_count[s]}
+         for s in subnet_ips],
+        key=lambda x: x["attempts"], reverse=True
+    )
+    return result[:10]
+
+def get_whitelist():
+    """Retourne la liste des IPs ignorées par Fail2Ban."""
+    out = run("sudo fail2ban-client get sshd ignoreip 2>/dev/null")
+    ips = []
+    for item in out.replace(",", " ").split():
+        item = item.strip()
+        if re.match(r"^\d{1,3}(\.\d{1,3}){3}", item) or "/" in item:
+            ips.append(item)
+    return ips
+
 # ─────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────
@@ -306,12 +467,32 @@ def build_html():
     perf_labels, perf_cpu, perf_ram, perf_disk = get_metrics_history(24)
     top_ips    = [ip for ip, _ in ssh_fails.most_common(20)]
     geo_data   = get_geo_data(top_ips)
+    timeline   = get_timeline_events(24)
+    heatmap, heatmap_days = get_attack_heatmap(7)
+    subnets    = get_subnet_correlation(ssh_fails)
+    whitelist  = get_whitelist()
+    threat     = compute_threat_score(metrics, ssh_total, bans_today, ban_count)
 
-    # ── Badges services (résumé header) ──
+    # ── Score menace ──
+    if threat >= 70:
+        threat_color, threat_label, threat_bg = "#ef4444", "ÉLEVÉE", "#450a0a"
+    elif threat >= 40:
+        threat_color, threat_label, threat_bg = "#f59e0b", "MODÉRÉE", "#451a03"
+    else:
+        threat_color, threat_label, threat_bg = "#22c55e", "FAIBLE", "#0d2318"
+
+    # ── Services ──
     svc_down = [l for l, s in srv_status if s != "active"]
-    svc_badge = ""
-    if svc_down:
-        svc_badge = f"<span style='background:#7f1d1d;color:#fca5a5;border-radius:6px;padding:2px 10px;font-size:11px;font-weight:600'>⚠ {len(svc_down)} service(s) KO</span>"
+    svc_badge = f"<span style='background:#7f1d1d;color:#fca5a5;border-radius:6px;padding:2px 10px;font-size:11px;font-weight:600'>⚠ {len(svc_down)} KO</span>" if svc_down else ""
+
+    services_cards = ""
+    for label, status in srv_status:
+        ok = status == "active"
+        services_cards += f"""<div style="background:{'#0d2318' if ok else '#2d0a0a'};border:1px solid {'#166534' if ok else '#7f1d1d'};border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:10px">
+          <span style="color:{'#22c55e' if ok else '#ef4444'};font-size:16px">{'●' if ok else '✕'}</span>
+          <div><div style="font-size:12px;font-weight:600;color:#e2e8f0">{label}</div>
+          <div style="font-size:10px;color:{'#22c55e' if ok else '#ef4444'}">{status}</div></div>
+        </div>"""
 
     # ── Alertes ──
     alert_banners = ""
@@ -324,12 +505,9 @@ def build_html():
 
     # ── Tendance bans ──
     trend_val = hist_bans[-1] - hist_bans[-2] if len(hist_bans) >= 2 else 0
-    if trend_val > 0:
-        trend_html = f"<span style='color:#ef4444;font-size:11px;margin-left:6px'>↑ +{trend_val} vs hier</span>"
-    elif trend_val < 0:
-        trend_html = f"<span style='color:#22c55e;font-size:11px;margin-left:6px'>↓ {trend_val} vs hier</span>"
-    else:
-        trend_html = "<span style='color:#64748b;font-size:11px;margin-left:6px'>= stable</span>"
+    if trend_val > 0:   trend_html = f"<span style='color:#ef4444;font-size:11px;margin-left:6px'>↑ +{trend_val}</span>"
+    elif trend_val < 0: trend_html = f"<span style='color:#22c55e;font-size:11px;margin-left:6px'>↓ {trend_val}</span>"
+    else:               trend_html = "<span style='color:#64748b;font-size:11px;margin-left:6px'>= stable</span>"
 
     cpu_color  = gc(metrics["cpu"],  WARN_CPU,  CRIT_CPU)
     ram_color  = gc(metrics["ram"],  WARN_MEM,  CRIT_MEM)
@@ -344,16 +522,6 @@ def build_html():
               sub=f"{metrics['swap_used']}GB / {metrics['swap_total']}GB", warn=60, crit=80)
     )
 
-    # ── Statut services (écran Overview) ──
-    services_cards = ""
-    for label, status in srv_status:
-        ok = status == "active"
-        services_cards += f"""<div style="background:{'#0d2318' if ok else '#2d0a0a'};border:1px solid {'#166534' if ok else '#7f1d1d'};border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:10px">
-          <span style="color:{'#22c55e' if ok else '#ef4444'};font-size:16px">{'●' if ok else '✕'}</span>
-          <div><div style="font-size:12px;font-weight:600;color:#e2e8f0">{label}</div>
-          <div style="font-size:10px;color:{'#22c55e' if ok else '#ef4444'}">{status}</div></div>
-        </div>"""
-
     # ── Top IPs ──
     top_ip_rows = ""
     for ip, count in ssh_fails.most_common(15):
@@ -361,12 +529,12 @@ def build_html():
         geo = geo_data.get(ip, {})
         loc = f"<span style='color:#475569;font-size:10px;margin-left:6px'>{geo.get('cc','')} {geo.get('city','')}</span>" if geo else ""
         btn = f"""<button onclick="banIP('{ip}')" class="btn-danger">Bannir</button>""" if ACTIONS_KEY else ""
-        top_ip_rows += f"<tr><td style='font-family:monospace;font-size:12px'>{is_banned} {ip}{loc}{btn}</td><td style='text-align:right;font-weight:700;color:#ef4444'>{count}</td></tr>"
+        top_ip_rows += f"<tr data-ip='{ip}'><td style='font-family:monospace;font-size:12px'>{is_banned} {ip}{loc}{btn}</td><td style='text-align:right;font-weight:700;color:#ef4444'>{count}</td></tr>"
 
     # ── Connexions légitimes ──
     accepted_html = ""
     for a in accepted[-8:]:
-        accepted_html += f"<tr><td style='color:#22c55e;font-size:11px'>✓</td><td style='font-family:monospace;font-size:12px'>{a['ip']}</td><td style='font-size:12px;color:#94a3b8'>{a['user']}</td></tr>"
+        accepted_html += f"<tr><td style='color:#22c55e;font-size:11px'>✓</td><td style='font-family:monospace;font-size:12px'>{a['ip']}</td><td style='font-size:12px;color:#94a3b8'>{a['user']}</td><td style='color:#64748b;font-size:11px'>{a.get('ts','')}</td></tr>"
 
     # ── Audit ──
     audit_html = ""
@@ -375,14 +543,21 @@ def build_html():
         ip, action, score = row[1], row[2], row[3]
         if "BAN_AUTO" in action or "BAN_OLLAMA" in action:
             badge = f"<span class='badge badge-red'>{action}</span>"
+            atype = "ban"
+        elif "UNBAN" in action:
+            badge = f"<span class='badge badge-green'>{action}</span>"
+            atype = "unban"
         elif "DRYRUN" in action:
             badge = f"<span class='badge badge-orange'>{action}</span>"
-        elif "OLLAMA" in action:
+            atype = "dryrun"
+        elif "OLLAMA" in action or "SURVEILLE" in action:
             badge = f"<span class='badge badge-purple'>{action}</span>"
+            atype = "analyze"
         else:
             badge = f"<span class='badge badge-gray'>{action}</span>"
+            atype = "other"
         unban_btn = f"""<button onclick="unbanIP('{ip}')" class="btn-success">Débannir</button>""" if ACTIONS_KEY and "BAN" in action else ""
-        audit_html += f"<tr><td style='color:#64748b;font-size:11px;white-space:nowrap'>{ts}</td><td style='font-family:monospace;font-size:11px'>{ip}</td><td>{badge}{unban_btn}</td><td style='text-align:right;color:#f59e0b;font-size:12px'>{score}%</td></tr>"
+        audit_html += f"<tr data-ip='{ip}' data-type='{atype}'><td style='color:#64748b;font-size:11px;white-space:nowrap'>{ts}</td><td style='font-family:monospace;font-size:11px'>{ip}</td><td>{badge}{unban_btn}</td><td style='text-align:right;color:#f59e0b;font-size:12px'>{score}%</td></tr>"
 
     # ── Containers ──
     containers_html = ""
@@ -413,7 +588,7 @@ def build_html():
         date_r = ai_summary.get("date","—")
         ai_new_btn = "<button onclick='askAI()' class='btn-primary'>⚡ Nouvelle analyse</button>" if ACTIONS_KEY else ""
         def fmt(t): return t.replace("\n","<br>").replace("  ","&nbsp;&nbsp;")
-        ai_screen_html = f"""
+        ai_html = f"""
 <div class="card" style="border-left:3px solid #818cf8;margin-bottom:14px">
   <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px">
     <h2 style="margin:0">🤖 Analyse IA — {date_r}</h2>
@@ -435,12 +610,60 @@ def build_html():
   </div>
 </div>"""
     else:
-        ai_screen_html = """<div class="card" style="border-left:3px solid #334155">
+        ai_html = """<div class="card" style="border-left:3px solid #334155;margin-bottom:14px">
           <h2>🤖 Analyse IA</h2>
           <div style="color:#475569;font-size:13px;padding:16px 0;text-align:center">Rapport IA non disponible — sera généré demain à 7h UTC</div>
         </div>"""
 
-    # ── Données JS ──
+    # ── Corrélation /24 ──
+    subnet_rows = ""
+    for s in subnets:
+        intensity = min(int(s["attempts"] / max(ssh_total, 1) * 100), 100)
+        bar_color = "#ef4444" if intensity > 30 else "#f59e0b"
+        subnet_rows += f"""<tr>
+          <td style='font-family:monospace;font-size:12px'>{s['subnet']}</td>
+          <td style='text-align:center;color:#a5b4fc'>{s['ips']}</td>
+          <td style='text-align:right'>
+            <div style='display:flex;align-items:center;gap:6px;justify-content:flex-end'>
+              <div style='width:60px;background:#1e2942;border-radius:3px;height:4px'>
+                <div style='width:{intensity}%;background:{bar_color};height:4px;border-radius:3px'></div>
+              </div>
+              <span style='font-weight:700;color:{bar_color};font-size:12px'>{s['attempts']}</span>
+            </div>
+          </td>
+        </tr>"""
+
+    # ── Whitelist ──
+    whitelist_html = ""
+    for ip in whitelist:
+        rm_btn = f"""<button onclick="removeWhitelist('{ip}')" class="btn-danger" style="padding:1px 6px">Retirer</button>""" if ACTIONS_KEY else ""
+        whitelist_html += f"<tr><td style='font-family:monospace;font-size:12px'>{ip}</td><td style='text-align:right'>{rm_btn}</td></tr>"
+
+    # ── Timeline HTML ──
+    timeline_html = ""
+    prev_day = None
+    for ev in timeline:
+        day = ev["ts"].strftime("%d/%m/%Y")
+        if day != prev_day:
+            timeline_html += f"<div style='font-size:11px;color:#334155;font-weight:600;padding:12px 0 6px;border-top:1px solid #1e2942;margin-top:4px'>{day}</div>"
+            prev_day = day
+        timeline_html += f"""<div style="display:flex;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #0d1117">
+          <div style="min-width:38px;font-size:11px;color:#475569;padding-top:2px">{ev['label']}</div>
+          <div style="font-size:16px;line-height:1">{ev['icon']}</div>
+          <div>
+            <div style="font-size:12px;font-weight:600;color:{ev['color']}">{ev['title']}</div>
+            {'<div style="font-size:11px;color:#475569;margin-top:1px">' + ev['detail'] + '</div>' if ev['detail'] else ''}
+          </div>
+        </div>"""
+    if not timeline_html:
+        timeline_html = "<div style='color:#475569;font-size:13px;padding:20px 0;text-align:center'>Aucun événement sur les 24 dernières heures</div>"
+
+    # ── Heatmap données JS ──
+    heatmap_js = json.dumps(heatmap)
+    heatmap_days_js = json.dumps(heatmap_days)
+    hmap_max = max((max(row) for row in heatmap if row), default=1)
+
+    # ── Données Chart.js ──
     hist_labels_js = json.dumps(hist_labels)
     hist_bans_js   = json.dumps(hist_bans)
     hist_watch_js  = json.dumps(hist_watches)
@@ -449,16 +672,16 @@ def build_html():
     perf_ram_js    = json.dumps(perf_ram)
     perf_disk_js   = json.dumps(perf_disk)
 
-    # Marqueurs Leaflet
+    # ── Marqueurs Leaflet ──
     geo_markers_js = ""
     for ip, count in ssh_fails.most_common(20):
         geo = geo_data.get(ip)
         if not geo: continue
-        lat, lon     = geo["lat"], geo["lon"]
-        country      = geo.get("country","?").replace("'","\\'")
-        city         = geo.get("city","").replace("'","\\'")
-        radius       = min(5 + count // 8, 22)
-        opacity      = min(0.4 + count / 200, 0.85)
+        lat, lon    = geo["lat"], geo["lon"]
+        country     = geo.get("country","?").replace("'","\\'")
+        city        = geo.get("city","").replace("'","\\'")
+        radius      = min(5 + count // 8, 22)
+        opacity     = min(0.4 + count / 200, 0.85)
         geo_markers_js += (
             f"L.circleMarker([{lat},{lon}],"
             f"{{radius:{radius},color:'#ef4444',fillColor:'#ef4444',"
@@ -469,7 +692,10 @@ def build_html():
             f"<br><b style=\"color:#ef4444\">{count} tentatives</b>');\n"
         )
 
-    # ── JS Actions ──
+    # ── Bouton rapport ──
+    report_btn = "<button onclick='sendReport()' class='btn-primary' style='font-size:11px;padding:4px 12px'>📋 Rapport maintenant</button>" if ACTIONS_KEY else ""
+
+    # ── Actions JS ──
     actions_js = ""
     if ACTIONS_KEY:
         actions_js = f"""
@@ -488,12 +714,29 @@ async function apiCall(ep,data){{
 }}
 async function banIP(ip){{if(!confirm(`Bannir ${{ip}} ?`))return;const r=await apiCall('/ban',{{ip}});showToast(r.ok?`✓ ${{ip}} bannie`:`Erreur: ${{r.error}}`,r.ok);}}
 async function unbanIP(ip){{if(!confirm(`Débannir ${{ip}} ?`))return;const r=await apiCall('/unban',{{ip}});showToast(r.ok?`✓ ${{ip}} débannie`:`Erreur: ${{r.error}}`,r.ok);}}
+async function addWhitelist(ip){{
+  const target=ip||window.prompt('IP à whitelister :');
+  if(!target)return;
+  const r=await apiCall('/whitelist/add',{{ip:target}});
+  showToast(r.ok?`✓ ${{target}} whitelistée`:`Erreur: ${{r.error}}`,r.ok);
+}}
+async function removeWhitelist(ip){{
+  if(!confirm(`Retirer ${{ip}} de la whitelist ?`))return;
+  const r=await apiCall('/whitelist/remove',{{ip}});
+  showToast(r.ok?`✓ ${{ip}} retirée`:`Erreur: ${{r.error}}`,r.ok);
+}}
+async function sendReport(){{
+  if(!confirm('Générer et envoyer le rapport maintenant ?'))return;
+  showToast('Rapport en cours de génération...', true, 5000);
+  const r=await apiCall('/report',{{}});
+  showToast(r.ok?`✓ ${{r.message}}`:`Erreur: ${{r.error}}`,r.ok, 6000);
+}}
 async function askAI(){{
   window.pauseRefresh();
   const p=window.prompt('Question SOC IA :','Quel est le niveau de risque actuel ?');
   window.resumeRefresh();
   if(!p)return;
-  showToast('Analyse en cours...',true,4000);
+  showToast('Analyse en cours...',true,5000);
   const r=await apiCall('/analyze',{{prompt:p}});
   if(r.ok){{document.getElementById('ai-response-box').style.display='block';document.getElementById('ai-response-text').innerHTML=r.response.replace(/\\n/g,'<br>');}}
   else showToast('Erreur IA : '+r.error,false);
@@ -510,199 +753,184 @@ async function askAI(){{
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{font-family:-apple-system,'Segoe UI',sans-serif;background:#0a0d14;color:#e2e8f0;display:flex;flex-direction:column;min-height:100vh}}
 h2{{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#475569;margin-bottom:12px;font-weight:600}}
-/* ── Navigation ── */
-.topbar{{background:#0d1117;border-bottom:1px solid #1e2942;padding:0 20px;display:flex;align-items:center;gap:0;position:sticky;top:0;z-index:1000}}
-.topbar-brand{{font-size:14px;font-weight:700;color:#a5b4fc;padding:14px 20px 14px 0;border-right:1px solid #1e2942;margin-right:8px;white-space:nowrap}}
-.nav-item{{padding:14px 16px;font-size:12px;font-weight:500;color:#475569;cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;white-space:nowrap;user-select:none}}
+.topbar{{background:#0d1117;border-bottom:1px solid #1e2942;padding:0 20px;display:flex;align-items:center;gap:0;position:sticky;top:0;z-index:1000;flex-wrap:wrap}}
+.topbar-brand{{font-size:14px;font-weight:700;color:#a5b4fc;padding:14px 16px 14px 0;border-right:1px solid #1e2942;margin-right:8px;white-space:nowrap}}
+.nav-item{{padding:14px 14px;font-size:12px;font-weight:500;color:#475569;cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;white-space:nowrap;user-select:none}}
 .nav-item:hover{{color:#94a3b8;border-bottom-color:#334155}}
 .nav-item.active{{color:#a5b4fc;border-bottom-color:#6366f1;font-weight:600}}
-.topbar-right{{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:11px;color:#334155;padding-left:16px}}
-/* ── Layout ── */
+.topbar-right{{margin-left:auto;display:flex;align-items:center;gap:10px;padding-left:12px}}
+.threat-badge{{padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700;border:1px solid}}
 .main{{flex:1;padding:16px 20px}}
-.screen{{display:none}}
-.screen.active{{display:block}}
-/* ── Grilles ── */
+.screen{{display:none}}.screen.active{{display:block}}
 .grid{{display:grid;gap:14px}}
-.g2{{grid-template-columns:repeat(2,1fr)}}
-.g3{{grid-template-columns:repeat(3,1fr)}}
-.g4{{grid-template-columns:repeat(4,1fr)}}
-.g5{{grid-template-columns:repeat(5,1fr)}}
+.g2{{grid-template-columns:repeat(2,1fr)}}.g3{{grid-template-columns:repeat(3,1fr)}}
+.g4{{grid-template-columns:repeat(4,1fr)}}.g5{{grid-template-columns:repeat(5,1fr)}}
 .g6{{grid-template-columns:repeat(6,1fr)}}
 @media(max-width:900px){{.g2,.g3,.g4,.g5,.g6{{grid-template-columns:1fr}}}}
 @media(min-width:901px) and (max-width:1200px){{.g6{{grid-template-columns:repeat(3,1fr)}}.g5{{grid-template-columns:repeat(3,1fr)}}}}
-/* ── Cards ── */
 .card{{background:#111827;border:1px solid #1e2942;border-radius:12px;padding:16px}}
 .stat-big{{font-size:28px;font-weight:700;line-height:1}}
 .stat-label{{font-size:11px;color:#64748b;margin-top:4px}}
 .stat-sub{{font-size:10px;color:#334155;margin-top:2px}}
-/* ── Tables ── */
 table{{width:100%;border-collapse:collapse;font-size:13px}}
-td,th{{padding:8px 8px;border-bottom:1px solid #1e2942}}
+td,th{{padding:8px;border-bottom:1px solid #1e2942}}
 th{{color:#64748b;font-size:11px;text-transform:uppercase;font-weight:600}}
 tr:last-child td{{border-bottom:none}}
-/* ── Gauges ── */
 .gauge{{margin-bottom:12px}}
-/* ── Containers ── */
 .container-card{{background:#0a0d14;border:1px solid #1e2942;border-radius:8px;padding:10px 12px;margin-bottom:6px}}
-/* ── Tabs IA ── */
 .tab-btn{{background:#0a0d14;border:1px solid #1e2942;color:#64748b;padding:6px 16px;border-radius:6px;font-size:12px;cursor:pointer;transition:all .2s}}
 .tab-btn:hover{{border-color:#4338ca;color:#a5b4fc}}
 .tab-active{{background:#1e1b4b;border-color:#4338ca;color:#a5b4fc;font-weight:600}}
-/* ── Boutons ── */
 .btn-danger{{background:#7f1d1d;border:none;color:#fca5a5;padding:2px 8px;border-radius:4px;font-size:10px;cursor:pointer;margin-left:6px}}
 .btn-success{{background:#14532d;border:none;color:#86efac;padding:2px 6px;border-radius:4px;font-size:10px;cursor:pointer;margin-left:4px}}
 .btn-primary{{background:#312e81;border:1px solid #4338ca;color:#a5b4fc;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer}}
-/* ── Badges ── */
 .badge{{padding:2px 7px;border-radius:4px;font-size:11px;font-weight:500}}
-.badge-red{{background:#dc2626;color:#fff}}
-.badge-orange{{background:#d97706;color:#fff}}
-.badge-purple{{background:#7c3aed;color:#fff}}
-.badge-gray{{background:#334155;color:#94a3b8}}
-/* ── Alertes ── */
+.badge-red{{background:#dc2626;color:#fff}}.badge-orange{{background:#d97706;color:#fff}}
+.badge-purple{{background:#7c3aed;color:#fff}}.badge-gray{{background:#334155;color:#94a3b8}}
+.badge-green{{background:#166534;color:#86efac}}
 .alert-banner{{border-radius:8px;padding:10px 16px;margin-bottom:10px;font-weight:600;font-size:13px}}
 .alert-crit{{background:#450a0a;border:1px solid #dc2626;color:#fca5a5}}
 .alert-warn{{background:#451a03;border:1px solid #d97706;color:#fcd34d}}
-/* ── Carte ── */
 #geomap{{height:460px;border-radius:8px;background:#0a0d14}}
 .leaflet-tile{{filter:brightness(0.55) saturate(0.35)}}
 .leaflet-container{{background:#0a0d14}}
 .leaflet-popup-content-wrapper{{background:#1e2942;border:1px solid #334155;color:#e2e8f0;border-radius:8px}}
 .leaflet-popup-tip{{background:#1e2942}}
-/* ── Toast ── */
+/* Heatmap */
+.heatmap-grid{{display:grid;grid-template-columns:40px repeat(24,1fr);gap:2px;font-size:9px}}
+.hm-cell{{height:22px;border-radius:3px;cursor:default;transition:opacity .15s}}
+.hm-cell:hover{{opacity:0.75;outline:1px solid #fff}}
+.hm-label{{display:flex;align-items:center;justify-content:flex-end;padding-right:6px;color:#475569;font-size:10px;height:22px}}
+.hm-hour{{text-align:center;color:#334155;padding-bottom:4px}}
+/* Filtres */
+.filter-bar{{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}}
+.filter-btn{{background:#1e2942;border:1px solid #334155;color:#64748b;padding:4px 12px;border-radius:6px;font-size:11px;cursor:pointer;transition:all .15s}}
+.filter-btn:hover{{border-color:#4338ca;color:#a5b4fc}}
+.filter-btn.active{{background:#1e1b4b;border-color:#4338ca;color:#a5b4fc;font-weight:600}}
+.search-input{{background:#0a0d14;border:1px solid #1e2942;color:#e2e8f0;padding:6px 12px;border-radius:6px;font-size:12px;width:200px;outline:none}}
+.search-input:focus{{border-color:#4338ca}}
 #toast{{display:none;position:fixed;bottom:20px;right:20px;padding:10px 18px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.5)}}
 </style>
 </head><body>
-
 <div id="toast"></div>
 
-<!-- ═══ BARRE DE NAVIGATION ═══ -->
+<!-- ═══ NAVIGATION ═══ -->
 <nav class="topbar">
   <div class="topbar-brand">🛡️ ViaDigiTech SOC</div>
-  <div class="nav-item active" onclick="showScreen('overview')"     id="nav-overview">     Vue globale</div>
-  <div class="nav-item"        onclick="showScreen('security')"     id="nav-security">     Sécurité</div>
-  <div class="nav-item"        onclick="showScreen('performance')"  id="nav-performance">  Performance</div>
-  <div class="nav-item"        onclick="showScreen('infra')"        id="nav-infra">        Infrastructure</div>
+  <div class="nav-item active" onclick="showScreen('overview')"    id="nav-overview">Vue globale</div>
+  <div class="nav-item"        onclick="showScreen('security')"    id="nav-security">Sécurité</div>
+  <div class="nav-item"        onclick="showScreen('performance')" id="nav-performance">Performance</div>
+  <div class="nav-item"        onclick="showScreen('timeline')"    id="nav-timeline">Timeline</div>
+  <div class="nav-item"        onclick="showScreen('infra')"       id="nav-infra">Infrastructure</div>
   <div class="topbar-right">
-    <span>{svc_badge}</span>
-    <span style="color:#334155">{hostname} · {now.strftime('%d/%m %H:%M')}</span>
+    {report_btn}
+    <div class="threat-badge" style="background:{threat_bg};color:{threat_color};border-color:{threat_color}">
+      {threat}/100 — {threat_label}
+    </div>
+    {svc_badge}
+    <span style="font-size:11px;color:#334155">{hostname} · {now.strftime('%d/%m %H:%M')}</span>
   </div>
 </nav>
 
 <div class="main">
 {alert_banners}
 
-<!-- ════════════════════════════════════ -->
-<!-- ÉCRAN 1 : VUE GLOBALE               -->
-<!-- ════════════════════════════════════ -->
+<!-- ═══════════ ÉCRAN 1 : VUE GLOBALE ═══════════ -->
 <div class="screen active" id="screen-overview">
-
-  <!-- Stat cards -->
   <div class="grid g6" style="margin-bottom:14px">
-    <div class="card">
-      <div class="stat-big" style="color:{cpu_color}">{metrics['cpu']:.0f}%</div>
-      <div class="stat-label">CPU</div><div class="stat-sub">Load {metrics['load1']}</div>
-    </div>
-    <div class="card">
-      <div class="stat-big" style="color:{ram_color}">{metrics['ram']:.0f}%</div>
-      <div class="stat-label">RAM</div><div class="stat-sub">{metrics['ram_used']}GB / {metrics['ram_total']}GB</div>
-    </div>
-    <div class="card">
-      <div class="stat-big" style="color:{disk_color}">{metrics['disk']:.0f}%</div>
-      <div class="stat-label">Disque</div><div class="stat-sub">{metrics['disk_used']}GB / {metrics['disk_total']}GB</div>
-    </div>
-    <div class="card">
-      <div class="stat-big" style="color:#ef4444">{ban_count}</div>
-      <div class="stat-label">IPs bannies</div>
-    </div>
-    <div class="card">
-      <div class="stat-big" style="color:#f59e0b">{ssh_total}</div>
-      <div class="stat-label">Échecs SSH 24h</div>
-      <div class="stat-sub">{len(ssh_fails)} IPs distinctes</div>
-    </div>
-    <div class="card">
-      <div class="stat-big" style="color:#ef4444">{bans_today}{trend_html}</div>
-      <div class="stat-label">Auto-bans aujourd'hui</div>
-    </div>
+    <div class="card"><div class="stat-big" style="color:{cpu_color}">{metrics['cpu']:.0f}%</div><div class="stat-label">CPU</div><div class="stat-sub">Load {metrics['load1']}</div></div>
+    <div class="card"><div class="stat-big" style="color:{ram_color}">{metrics['ram']:.0f}%</div><div class="stat-label">RAM</div><div class="stat-sub">{metrics['ram_used']}GB / {metrics['ram_total']}GB</div></div>
+    <div class="card"><div class="stat-big" style="color:{disk_color}">{metrics['disk']:.0f}%</div><div class="stat-label">Disque</div><div class="stat-sub">{metrics['disk_used']}GB / {metrics['disk_total']}GB</div></div>
+    <div class="card"><div class="stat-big" style="color:#ef4444">{ban_count}</div><div class="stat-label">IPs bannies</div></div>
+    <div class="card"><div class="stat-big" style="color:#f59e0b">{ssh_total}</div><div class="stat-label">Échecs SSH 24h</div><div class="stat-sub">{len(ssh_fails)} IPs distinctes</div></div>
+    <div class="card"><div class="stat-big" style="color:#ef4444">{bans_today}{trend_html}</div><div class="stat-label">Auto-bans aujourd'hui</div></div>
   </div>
-
-  <!-- Statut services -->
-  <div class="grid g5" style="margin-bottom:14px">
-    {services_cards}
-  </div>
-
-  <!-- Analyse IA -->
-  <div style="margin-bottom:14px">
-    {ai_screen_html}
-  </div>
-
-  <!-- Uptime + activité 7j -->
+  <div class="grid g5" style="margin-bottom:14px">{services_cards}</div>
+  <div style="margin-bottom:14px">{ai_html}</div>
   <div class="grid g2" style="margin-bottom:14px">
-    <div class="card">
-      <h2>Activité — 7 derniers jours</h2>
-      <canvas id="histChart" height="200"></canvas>
-    </div>
+    <div class="card"><h2>Activité — 7 derniers jours</h2><canvas id="histChart" height="200"></canvas></div>
     <div class="card">
       <h2>Métriques système</h2>
       {gauges_html}
-      <div style="margin-top:14px;padding-top:12px;border-top:1px solid #1e2942;font-size:11px;color:#64748b">
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid #1e2942;font-size:11px;color:#64748b">
         Uptime : <span style="color:#94a3b8;font-weight:600">{metrics['uptime_days']}j {metrics['uptime_hours']}h</span>
-        &nbsp;·&nbsp; Containers : <span style="color:#a5b4fc;font-weight:600">{sum(1 for c in containers if 'Up' in c.get('Status',''))}/{len(containers)} actifs</span>
+        &nbsp;·&nbsp; Docker : <span style="color:#a5b4fc;font-weight:600">{sum(1 for c in containers if 'Up' in c.get('Status',''))}/{len(containers)}</span>
       </div>
     </div>
   </div>
+</div>
 
-</div><!-- /screen-overview -->
-
-<!-- ════════════════════════════════════ -->
-<!-- ÉCRAN 2 : SÉCURITÉ                  -->
-<!-- ════════════════════════════════════ -->
+<!-- ═══════════ ÉCRAN 2 : SÉCURITÉ ═══════════ -->
 <div class="screen" id="screen-security">
+  <!-- Barre de recherche + filtres -->
+  <div class="filter-bar" style="margin-bottom:14px">
+    <input type="text" class="search-input" id="ip-search" placeholder="🔍 Rechercher une IP..." oninput="filterSecurity()">
+    <button class="filter-btn active" onclick="setFilter('all')"     id="f-all">Tous</button>
+    <button class="filter-btn"        onclick="setFilter('ban')"     id="f-ban">BAN</button>
+    <button class="filter-btn"        onclick="setFilter('unban')"   id="f-unban">UNBAN</button>
+    <button class="filter-btn"        onclick="setFilter('analyze')" id="f-analyze">ANALYZE</button>
+    <span style="font-size:11px;color:#334155;margin-left:4px" id="filter-count"></span>
+  </div>
 
-  <!-- Carte géo pleine largeur -->
+  <!-- Carte géo -->
   <div class="card" style="margin-bottom:14px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-      <h2 style="margin:0">Carte des attaques — origines géographiques</h2>
+      <h2 style="margin:0">Carte des attaques</h2>
       <span style="font-size:11px;color:#334155">{len(geo_data)} IPs géolocalisées · ip-api.com</span>
     </div>
     <div id="geomap"></div>
   </div>
 
-  <!-- Top IPs + Audit -->
   <div class="grid g2" style="margin-bottom:14px">
     <div class="card">
       <h2>Top IPs attaquantes 24h</h2>
-      {"<div style='color:#475569;font-size:13px;padding:12px 0'>Aucune activité SSH suspecte</div>" if not top_ip_rows else f"<div style='max-height:380px;overflow-y:auto'><table><thead><tr><th>IP</th><th style='text-align:right'>Tentatives</th></tr></thead><tbody>{top_ip_rows}</tbody></table></div>"}
-      {f'<div style="margin-top:14px;padding-top:12px;border-top:1px solid #1e2942"><h2>Connexions légitimes 24h</h2><table><thead><tr><th></th><th>IP</th><th>Utilisateur</th></tr></thead><tbody>{accepted_html}</tbody></table></div>' if accepted_html else ""}
+      {"<div style='color:#475569;font-size:13px;padding:12px 0'>Aucune activité SSH suspecte</div>" if not top_ip_rows else f"<div style='max-height:360px;overflow-y:auto'><table id='ip-table'><thead><tr><th>IP</th><th style='text-align:right'>Tentatives</th></tr></thead><tbody>{top_ip_rows}</tbody></table></div>"}
+      {f'<div style="margin-top:14px;padding-top:12px;border-top:1px solid #1e2942"><h2>Connexions légitimes 24h</h2><table><thead><tr><th></th><th>IP</th><th>Utilisateur</th><th>Heure</th></tr></thead><tbody>{accepted_html}</tbody></table></div>' if accepted_html else ""}
     </div>
     <div class="card">
-      <h2>Journal d'audit — dernières actions</h2>
-      {"<div style='color:#475569;font-size:13px;padding:12px 0'>Aucune action enregistrée</div>" if not audit_html else f"<div style='max-height:380px;overflow-y:auto'><table><thead><tr><th>Heure</th><th>IP</th><th>Action</th><th style='text-align:right'>Score</th></tr></thead><tbody>{audit_html}</tbody></table></div>"}
+      <h2>Journal d'audit</h2>
+      {"<div style='color:#475569;font-size:13px;padding:12px 0'>Aucune action enregistrée</div>" if not audit_html else f"<div style='max-height:360px;overflow-y:auto'><table id='audit-table'><thead><tr><th>Heure</th><th>IP</th><th>Action</th><th style='text-align:right'>Score</th></tr></thead><tbody>{audit_html}</tbody></table></div>"}
     </div>
   </div>
 
-</div><!-- /screen-security -->
+  <!-- Corrélation /24 -->
+  <div class="card" style="margin-bottom:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2 style="margin:0">Corrélation par sous-réseau /24</h2>
+      <span style="font-size:11px;color:#334155">{len(subnets)} blocs détectés</span>
+    </div>
+    {"<div style='color:#475569;font-size:13px;padding:8px 0'>Aucune corrélation détectée</div>" if not subnet_rows else f"<table><thead><tr><th>Sous-réseau</th><th style='text-align:center'>IPs uniques</th><th style='text-align:right'>Tentatives</th></tr></thead><tbody>{subnet_rows}</tbody></table>"}
+  </div>
+</div>
 
-<!-- ════════════════════════════════════ -->
-<!-- ÉCRAN 3 : PERFORMANCE               -->
-<!-- ════════════════════════════════════ -->
+<!-- ═══════════ ÉCRAN 3 : PERFORMANCE ═══════════ -->
 <div class="screen" id="screen-performance">
-
-  <!-- CPU/RAM/Disk 24h -->
   <div class="card" style="margin-bottom:14px">
     <h2>CPU / RAM / Disque — 24 dernières heures</h2>
-    {'<canvas id="perfChart" height="120"></canvas>' if perf_labels else '<div style="color:#475569;font-size:13px;padding:24px 0;text-align:center">Historique en cours de constitution — disponible dans 15 min</div>'}
+    {'<canvas id="perfChart" height="110"></canvas>' if perf_labels else '<div style="color:#475569;font-size:13px;padding:24px 0;text-align:center">Historique en cours de constitution</div>'}
   </div>
-
-  <!-- Jauges + swap -->
-  <div class="grid g2" style="margin-bottom:14px">
-    <div class="card">
-      <h2>État actuel</h2>
-      {gauges_html}
+  <div class="card" style="margin-bottom:14px">
+    <h2>Heatmap des attaques SSH — 7 jours × 24 heures</h2>
+    <div style="overflow-x:auto;padding-top:4px">
+      <div id="heatmap-container"></div>
     </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:10px;color:#475569">
+      <span>0</span>
+      <div style="display:flex;gap:2px">
+        <div style="width:14px;height:8px;border-radius:2px;background:#0d2318"></div>
+        <div style="width:14px;height:8px;border-radius:2px;background:#7f1d1d"></div>
+        <div style="width:14px;height:8px;border-radius:2px;background:#ef4444"></div>
+      </div>
+      <span>{hmap_max}+</span>
+      <span style="margin-left:8px">· hover pour le détail</span>
+    </div>
+  </div>
+  <div class="grid g2" style="margin-bottom:14px">
+    <div class="card"><h2>État actuel</h2>{gauges_html}</div>
     <div class="card">
       <h2>Résumé</h2>
       <table>
-        <tr><td style="color:#64748b">CPU</td><td style="font-weight:600;color:{cpu_color}">{metrics['cpu']:.1f}%</td><td style="color:#64748b;font-size:11px">Load avg {metrics['load1']}</td></tr>
+        <tr><td style="color:#64748b">CPU</td><td style="font-weight:600;color:{cpu_color}">{metrics['cpu']:.1f}%</td><td style="color:#64748b;font-size:11px">Load {metrics['load1']}</td></tr>
         <tr><td style="color:#64748b">RAM</td><td style="font-weight:600;color:{ram_color}">{metrics['ram']:.1f}%</td><td style="color:#64748b;font-size:11px">{metrics['ram_used']} / {metrics['ram_total']} GB</td></tr>
         <tr><td style="color:#64748b">Disque</td><td style="font-weight:600;color:{disk_color}">{metrics['disk']:.1f}%</td><td style="color:#64748b;font-size:11px">{metrics['disk_used']} / {metrics['disk_total']} GB</td></tr>
         <tr><td style="color:#64748b">Swap</td><td style="font-weight:600;color:#94a3b8">{metrics['swap_used']} GB</td><td style="color:#64748b;font-size:11px">/ {metrics['swap_total']} GB</td></tr>
@@ -710,159 +938,208 @@ tr:last-child td{{border-bottom:none}}
       </table>
     </div>
   </div>
-
-  <!-- Log détecteur -->
   <div class="card">
-    <h2>Log détecteur temps réel (toutes les 15 min)</h2>
-    <div style="background:#0a0d14;border-radius:8px;padding:14px;max-height:320px;overflow-y:auto">
+    <h2>Log détecteur temps réel</h2>
+    <div style="background:#0a0d14;border-radius:8px;padding:14px;max-height:280px;overflow-y:auto">
       {det_html or '<div style="color:#475569;font-size:13px">Aucun log</div>'}
     </div>
   </div>
+</div>
 
-</div><!-- /screen-performance -->
+<!-- ═══════════ ÉCRAN 4 : TIMELINE ═══════════ -->
+<div class="screen" id="screen-timeline">
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h2 style="margin:0">Timeline des événements — 24 dernières heures</h2>
+      <span style="font-size:11px;color:#334155">{len(timeline)} événements</span>
+    </div>
+    <div style="max-height:calc(100vh - 200px);overflow-y:auto">
+      {timeline_html}
+    </div>
+  </div>
+</div>
 
-<!-- ════════════════════════════════════ -->
-<!-- ÉCRAN 5 : INFRASTRUCTURE            -->
-<!-- ════════════════════════════════════ -->
+<!-- ═══════════ ÉCRAN 5 : INFRASTRUCTURE ═══════════ -->
 <div class="screen" id="screen-infra">
-
-  <!-- Statut services -->
   <div class="card" style="margin-bottom:14px">
     <h2>Statut des services</h2>
     <div class="grid g5" style="margin-top:4px">{services_cards}</div>
   </div>
-
-  <!-- Containers -->
-  <div class="card" style="margin-bottom:14px">
-    <h2>Conteneurs Docker — {len(containers)} total · {sum(1 for c in containers if 'Up' in c.get('Status',''))} actifs</h2>
-    <div class="grid g3" style="margin-top:4px">
-      {containers_html or '<div style="color:#475569;font-size:13px">Aucun container détecté</div>'}
+  <div class="grid g2" style="margin-bottom:14px">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h2 style="margin:0">Whitelist Fail2Ban</h2>
+        {'<button onclick="addWhitelist()" class="btn-primary" style="font-size:11px;padding:4px 12px">+ Ajouter IP</button>' if ACTIONS_KEY else ''}
+      </div>
+      {"<div style='color:#475569;font-size:13px;padding:8px 0'>Whitelist vide</div>" if not whitelist_html else f"<table><thead><tr><th>IP / Réseau</th><th></th></tr></thead><tbody>{whitelist_html}</tbody></table>"}
+    </div>
+    <div class="card">
+      <h2>Conteneurs Docker — {len(containers)} · {sum(1 for c in containers if 'Up' in c.get('Status',''))} actifs</h2>
+      <div class="grid g2" style="margin-top:4px">
+        {containers_html or '<div style="color:#475569;font-size:13px">Aucun container détecté</div>'}
+      </div>
     </div>
   </div>
-
-</div><!-- /screen-infra -->
+</div>
 
 </div><!-- /main -->
 
-<!-- ── Footer ── -->
 <div style="text-align:center;font-size:10px;color:#1e2942;padding:8px;border-top:1px solid #0d1117">
-  ViaDigiTech AI SecOps v5 · {hostname} · dashboard 15min · seuils CPU {WARN_CPU}/{CRIT_CPU}% · RAM {WARN_MEM}/{CRIT_MEM}% · Disk {WARN_DISK}/{CRIT_DISK}%
+  ViaDigiTech AI SecOps v6 · {hostname} · 15min · seuils CPU {WARN_CPU}/{CRIT_CPU}% · RAM {WARN_MEM}/{CRIT_MEM}% · Disk {WARN_DISK}/{CRIT_DISK}%
 </div>
 
 <script>
 // ── Navigation ──
-function showScreen(id) {{
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  document.getElementById('screen-' + id).classList.add('active');
-  document.getElementById('nav-' + id).classList.add('active');
-  // Recalcule la carte Leaflet quand l'écran sécurité devient visible
-  if (id === 'security' && window._leafletMap) {{
-    setTimeout(() => window._leafletMap.invalidateSize(), 50);
-  }}
-  // Recalcule les charts performance
-  if (id === 'performance') {{
-    setTimeout(() => window.dispatchEvent(new Event('resize')), 50);
-  }}
-  // Sauvegarde l'écran actif
-  sessionStorage.setItem('soc_screen', id);
+function showScreen(id){{
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('screen-'+id).classList.add('active');
+  document.getElementById('nav-'+id).classList.add('active');
+  if(id==='security'&&window._leafletMap) setTimeout(()=>window._leafletMap.invalidateSize(),50);
+  if(id==='performance') setTimeout(()=>window.dispatchEvent(new Event('resize')),50);
+  sessionStorage.setItem('soc_screen',id);
 }}
-
-// ── Restore dernier écran ──
-(function() {{
-  const saved = sessionStorage.getItem('soc_screen');
-  if (saved) showScreen(saved);
-}})();
+(function(){{const s=sessionStorage.getItem('soc_screen');if(s)showScreen(s);}})();
 
 // ── Onglets IA ──
-function showTab(id) {{
-  document.querySelectorAll('.tab-pane').forEach(p => p.style.display='none');
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('tab-active'));
+function showTab(id){{
+  document.querySelectorAll('.tab-pane').forEach(p=>p.style.display='none');
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('tab-active'));
   document.getElementById(id).style.display='block';
-  const btn = document.getElementById('btn-' + id.replace('tab-',''));
-  if (btn) btn.classList.add('tab-active');
+  const btn=document.getElementById('btn-'+id.replace('tab-',''));
+  if(btn)btn.classList.add('tab-active');
 }}
 
 // ── Refresh intelligent ──
-(function() {{
-  let lastActivity = Date.now(), paused = false;
-  document.addEventListener('click', () => lastActivity = Date.now());
-  document.addEventListener('keydown', () => lastActivity = Date.now());
-  window.pauseRefresh  = () => {{ paused = true; }};
-  window.resumeRefresh = () => {{ paused = false; lastActivity = Date.now(); }};
-  setTimeout(function check() {{
-    if (!paused && Date.now() - lastActivity > 10000) {{ location.reload(); return; }}
-    setTimeout(check, 300000);
-  }}, 300000);
+(function(){{
+  let last=Date.now(),paused=false;
+  document.addEventListener('click',()=>last=Date.now());
+  document.addEventListener('keydown',()=>last=Date.now());
+  window.pauseRefresh=()=>paused=true;
+  window.resumeRefresh=()=>{{paused=false;last=Date.now();}};
+  setTimeout(function check(){{
+    if(!paused&&Date.now()-last>10000){{location.reload();return;}}
+    setTimeout(check,300000);
+  }},300000);
+}})();
+
+// ── Notifications browser ──
+(function(){{
+  const prev=parseInt(localStorage.getItem('soc_bans')||'0');
+  const curr={bans_today};
+  localStorage.setItem('soc_bans',curr);
+  if(curr>prev&&prev>0){{
+    if(Notification.permission==='granted'){{
+      new Notification('🚨 SOC ViaDigiTech',{{body:`${{curr}} auto-bans aujourd'hui (+${{curr-prev}} depuis la dernière visite)`,icon:''}});
+    }}
+  }}
+  if(Notification.permission==='default'){{
+    setTimeout(()=>Notification.requestPermission(),3000);
+  }}
 }})();
 
 // ── Toast ──
-function showToast(msg, ok, duration=4000) {{
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.style.background = ok ? '#14532d' : '#7f1d1d';
-  t.style.color = ok ? '#86efac' : '#fca5a5';
-  t.style.display = 'block';
-  setTimeout(() => t.style.display = 'none', duration);
+function showToast(msg,ok,duration=4000){{
+  const t=document.getElementById('toast');
+  t.textContent=msg;t.style.background=ok?'#14532d':'#7f1d1d';
+  t.style.color=ok?'#86efac':'#fca5a5';t.style.display='block';
+  setTimeout(()=>t.style.display='none',duration);
+}}
+
+// ── Recherche + filtres sécurité ──
+let _filter='all';
+function setFilter(f){{
+  _filter=f;
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('f-'+f).classList.add('active');
+  filterSecurity();
+}}
+function filterSecurity(){{
+  const q=(document.getElementById('ip-search').value||'').toLowerCase();
+  let shown=0;
+  document.querySelectorAll('#audit-table tbody tr').forEach(r=>{{
+    const ip=r.dataset.ip||'';
+    const type=r.dataset.type||'';
+    const matchQ=!q||ip.includes(q);
+    const matchF=_filter==='all'||type===_filter;
+    r.style.display=(matchQ&&matchF)?'':'none';
+    if(matchQ&&matchF)shown++;
+  }});
+  document.querySelectorAll('#ip-table tbody tr').forEach(r=>{{
+    const ip=r.dataset.ip||'';
+    r.style.display=(!q||ip.includes(q))?'':'none';
+  }});
+  document.getElementById('filter-count').textContent=q||_filter!=='all'?shown+' résultat(s)':'';
 }}
 
 // ── Graphique 7 jours ──
-(function() {{
-  const el = document.getElementById('histChart');
-  if (!el) return;
-  new Chart(el.getContext('2d'), {{
-    type: 'bar',
-    data: {{
-      labels: {hist_labels_js},
-      datasets: [
-        {{ label:'Bans auto', data:{hist_bans_js}, backgroundColor:'rgba(239,68,68,0.7)', borderColor:'#ef4444', borderWidth:1, borderRadius:4 }},
-        {{ label:'Surveillés', data:{hist_watch_js}, backgroundColor:'rgba(99,102,241,0.5)', borderColor:'#6366f1', borderWidth:1, borderRadius:4 }}
-      ]
-    }},
-    options: {{
-      responsive:true,
-      plugins:{{ legend:{{ labels:{{ color:'#94a3b8', font:{{ size:11 }} }} }}, tooltip:{{ mode:'index' }} }},
-      scales:{{ x:{{ ticks:{{ color:'#64748b' }}, grid:{{ color:'#1e2942' }} }}, y:{{ ticks:{{ color:'#64748b' }}, grid:{{ color:'#1e2942' }}, beginAtZero:true }} }}
-    }}
+(function(){{
+  const el=document.getElementById('histChart');if(!el)return;
+  new Chart(el.getContext('2d'),{{
+    type:'bar',
+    data:{{labels:{hist_labels_js},datasets:[
+      {{label:'Bans auto',data:{hist_bans_js},backgroundColor:'rgba(239,68,68,0.7)',borderColor:'#ef4444',borderWidth:1,borderRadius:4}},
+      {{label:'Surveillés',data:{hist_watch_js},backgroundColor:'rgba(99,102,241,0.5)',borderColor:'#6366f1',borderWidth:1,borderRadius:4}}
+    ]}},
+    options:{{responsive:true,plugins:{{legend:{{labels:{{color:'#94a3b8',font:{{size:11}}}}}},tooltip:{{mode:'index'}}}},
+      scales:{{x:{{ticks:{{color:'#64748b'}},grid:{{color:'#1e2942'}}}},y:{{ticks:{{color:'#64748b'}},grid:{{color:'#1e2942'}},beginAtZero:true}}}}}}
   }});
 }})();
 
-// ── Graphique CPU/RAM/Disk 24h ──
-(function() {{
-  const el = document.getElementById('perfChart');
-  if (!el) return;
-  new Chart(el.getContext('2d'), {{
-    type: 'line',
-    data: {{
-      labels: {perf_labels_js},
-      datasets: [
-        {{ label:'CPU %',  data:{perf_cpu_js},  borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,0.07)', borderWidth:2, pointRadius:0, tension:0.3, fill:true }},
-        {{ label:'RAM %',  data:{perf_ram_js},  borderColor:'#6366f1', backgroundColor:'rgba(99,102,241,0.07)', borderWidth:2, pointRadius:0, tension:0.3, fill:true }},
-        {{ label:'Disk %', data:{perf_disk_js}, borderColor:'#22c55e', backgroundColor:'rgba(34,197,94,0.05)',  borderWidth:1.5, pointRadius:0, tension:0.3, borderDash:[4,4], fill:true }}
-      ]
-    }},
-    options: {{
-      responsive:true,
-      plugins:{{ legend:{{ labels:{{ color:'#94a3b8', font:{{ size:11 }} }} }}, tooltip:{{ mode:'index', intersect:false }} }},
-      scales:{{ x:{{ ticks:{{ color:'#64748b', maxTicksLimit:10 }}, grid:{{ color:'#1e2942' }} }}, y:{{ ticks:{{ color:'#64748b' }}, grid:{{ color:'#1e2942' }}, min:0, max:100 }} }}
-    }}
+// ── Graphique CPU/RAM 24h ──
+(function(){{
+  const el=document.getElementById('perfChart');if(!el)return;
+  new Chart(el.getContext('2d'),{{
+    type:'line',
+    data:{{labels:{perf_labels_js},datasets:[
+      {{label:'CPU %',data:{perf_cpu_js},borderColor:'#f59e0b',backgroundColor:'rgba(245,158,11,0.07)',borderWidth:2,pointRadius:0,tension:0.3,fill:true}},
+      {{label:'RAM %',data:{perf_ram_js},borderColor:'#6366f1',backgroundColor:'rgba(99,102,241,0.07)',borderWidth:2,pointRadius:0,tension:0.3,fill:true}},
+      {{label:'Disk %',data:{perf_disk_js},borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,0.05)',borderWidth:1.5,pointRadius:0,tension:0.3,borderDash:[4,4],fill:true}}
+    ]}},
+    options:{{responsive:true,plugins:{{legend:{{labels:{{color:'#94a3b8',font:{{size:11}}}}}},tooltip:{{mode:'index',intersect:false}}}},
+      scales:{{x:{{ticks:{{color:'#64748b',maxTicksLimit:10}},grid:{{color:'#1e2942'}}}},y:{{ticks:{{color:'#64748b'}},grid:{{color:'#1e2942'}},min:0,max:100}}}}}}
   }});
+}})();
+
+// ── Heatmap ──
+(function(){{
+  const data={heatmap_js};
+  const days={heatmap_days_js};
+  const maxVal={hmap_max}||1;
+  const container=document.getElementById('heatmap-container');
+  if(!container)return;
+  let html='<div class="heatmap-grid">';
+  html+='<div class="hm-label"></div>';
+  for(let h=0;h<24;h++)html+=`<div class="hm-hour">${{h.toString().padStart(2,'0')}}</div>`;
+  for(let d=0;d<data.length;d++){{
+    html+=`<div class="hm-label">${{days[d]||''}}</div>`;
+    for(let h=0;h<24;h++){{
+      const v=data[d][h];
+      const intensity=v/maxVal;
+      let bg;
+      if(v===0)bg='#0d1117';
+      else if(intensity<0.25)bg='#1a0a0a';
+      else if(intensity<0.5)bg='#7f1d1d';
+      else if(intensity<0.75)bg='#b91c1c';
+      else bg='#ef4444';
+      html+=`<div class="hm-cell" style="background:${{bg}}" title="${{days[d]}} ${{h.toString().padStart(2,'0')}}h : ${{v}} tentatives"></div>`;
+    }}
+  }}
+  html+='</div>';
+  container.innerHTML=html;
 }})();
 
 // ── Carte Leaflet ──
-(function() {{
-  const map = L.map('geomap', {{ zoomControl:true, attributionControl:false }}).setView([20, 10], 2);
-  window._leafletMap = map;
-  L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png', {{
-    subdomains:'abcd', maxZoom:19
-  }}).addTo(map);
+(function(){{
+  const map=L.map('geomap',{{zoomControl:true,attributionControl:false}}).setView([20,10],2);
+  window._leafletMap=map;
+  L.tileLayer('https://{{s}}.basemaps.cartocdn.com/dark_all/{{z}}/{{x}}/{{y}}{{r}}.png',{{subdomains:'abcd',maxZoom:19}}).addTo(map);
   {geo_markers_js}
 }})();
 
 // ── Actions API ──
 {actions_js}
 </script>
-
 </body></html>"""
     return html
 
@@ -874,4 +1151,4 @@ if __name__ == "__main__":
     html = build_html()
     with open(OUTPUT_FILE, "w") as f:
         f.write(html)
-    print(f"[{datetime.now():%H:%M:%S}] Dashboard v5 généré → {OUTPUT_FILE}")
+    print(f"[{datetime.now():%H:%M:%S}] Dashboard v6 généré → {OUTPUT_FILE}")

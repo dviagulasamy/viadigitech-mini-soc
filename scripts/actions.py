@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 ViaDigiTech SOC — Serveur d'actions opérationnelles
-Port 8022, accessible via Caddy reverse proxy sur /action/
-Endpoints : /ban, /unban, /analyze, /status
+Port 8022, accessible via NPM reverse proxy sur /action/
+Endpoints : /ban, /unban, /analyze, /report, /whitelist/add, /whitelist/remove, /status
 """
 
 import os
 import re
 import subprocess
+import threading
 import requests
 from flask import Flask, request, jsonify
 from functools import wraps
@@ -111,6 +112,55 @@ Maximum 150 mots."""
         response = r.json().get("response", "").strip()
         print(f"[Actions] ANALYZE → {len(response)} chars")
         return jsonify({"ok": True, "response": response})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/report", methods=["POST"])
+@require_key
+def report():
+    """Déclenche report.py en arrière-plan et répond immédiatement."""
+    def _run():
+        subprocess.run(
+            ["python3", "/home/ubuntu/secops/report.py"],
+            capture_output=True, text=True, timeout=300
+        )
+    threading.Thread(target=_run, daemon=True).start()
+    print("[Actions] REPORT → démarré en arrière-plan")
+    return jsonify({"ok": True, "message": "Rapport en cours de génération — vous le recevrez par mail dans ~1 min"})
+
+@app.route("/whitelist/add", methods=["POST"])
+@require_key
+def whitelist_add():
+    ip = (request.json or {}).get("ip", "").strip()
+    if not valid_ip(ip):
+        return jsonify({"ok": False, "error": f"IP invalide : {ip}"}), 400
+    try:
+        r = subprocess.run(
+            ["sudo", "fail2ban-client", "set", "sshd", "addignoreip", ip],
+            capture_output=True, text=True, timeout=10
+        )
+        if r.returncode == 0:
+            print(f"[Actions] WHITELIST ADD {ip} → OK")
+            return jsonify({"ok": True, "message": f"{ip} ajoutée à la whitelist"})
+        return jsonify({"ok": False, "error": r.stderr.strip() or "Erreur fail2ban"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/whitelist/remove", methods=["POST"])
+@require_key
+def whitelist_remove():
+    ip = (request.json or {}).get("ip", "").strip()
+    if not valid_ip(ip):
+        return jsonify({"ok": False, "error": f"IP invalide : {ip}"}), 400
+    try:
+        r = subprocess.run(
+            ["sudo", "fail2ban-client", "set", "sshd", "delignoreip", ip],
+            capture_output=True, text=True, timeout=10
+        )
+        if r.returncode == 0:
+            print(f"[Actions] WHITELIST REMOVE {ip} → OK")
+            return jsonify({"ok": True, "message": f"{ip} retirée de la whitelist"})
+        return jsonify({"ok": False, "error": r.stderr.strip() or "IP non trouvée dans la whitelist"})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
