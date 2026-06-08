@@ -1490,7 +1490,7 @@ function filterSecurity(){{
     const last8=data.slice(-8);
     new Chart(el.getContext('2d'),{{
       type:'line',
-      data:{{labels:last8.map((_,i)=>i),datasets:[{{data:last8,borderColor:color,borderWidth:1.5,pointRadius:0,tension:0.4,fill:true,backgroundColor:color.replace(')',',.08)').replace('rgb','rgba')}}]}}}},
+      data:{{labels:last8.map((_,i)=>i),datasets:[{{data:last8,borderColor:color,borderWidth:1.5,pointRadius:0,tension:0.4,fill:true,backgroundColor:'rgba(255,255,255,0.04)'}}]}},
       options:{{responsive:false,plugins:{{legend:{{display:false}},tooltip:{{enabled:false}}}},scales:{{x:{{display:false}},y:{{display:false,min:0,max:100}}}},animation:false}}
     }});
   }}
