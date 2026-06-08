@@ -759,37 +759,69 @@ async function askAI(){{
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{font-family:-apple-system,'Segoe UI',sans-serif;background:#0a0d14;color:#e2e8f0;display:flex;flex-direction:column;min-height:100vh}}
 h2{{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#475569;margin-bottom:12px;font-weight:600}}
-.topbar{{background:#0d1117;border-bottom:1px solid #1e2942;padding:0 20px;display:flex;align-items:center;gap:0;position:sticky;top:0;z-index:1000;flex-wrap:wrap}}
+
+/* ── Topbar desktop ── */
+.topbar{{background:#0d1117;border-bottom:1px solid #1e2942;padding:0 20px;display:flex;align-items:center;position:sticky;top:0;z-index:1000}}
 .topbar-brand{{font-size:14px;font-weight:700;color:#a5b4fc;padding:14px 16px 14px 0;border-right:1px solid #1e2942;margin-right:8px;white-space:nowrap}}
 .nav-item{{padding:14px 14px;font-size:12px;font-weight:500;color:#475569;cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;white-space:nowrap;user-select:none}}
 .nav-item:hover{{color:#94a3b8;border-bottom-color:#334155}}
 .nav-item.active{{color:#a5b4fc;border-bottom-color:#6366f1;font-weight:600}}
 .topbar-right{{margin-left:auto;display:flex;align-items:center;gap:10px;padding-left:12px}}
+.topbar-hostname{{font-size:11px;color:#334155}}
 .threat-badge{{padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700;border:1px solid}}
+
+/* ── Hamburger (mobile only) ── */
+.hamburger{{display:none;background:none;border:none;color:#94a3b8;font-size:22px;cursor:pointer;padding:10px 8px;line-height:1}}
+.nav-drawer{{display:none;position:fixed;top:0;left:0;width:72%;max-width:260px;height:100vh;background:#0d1117;border-right:1px solid #1e2942;z-index:2000;flex-direction:column;padding:0;overflow-y:auto;transform:translateX(-100%);transition:transform .25s ease}}
+.nav-drawer.open{{transform:translateX(0)}}
+.nav-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1999}}
+.nav-overlay.open{{display:block}}
+.nav-drawer-header{{padding:16px 20px;border-bottom:1px solid #1e2942;font-size:14px;font-weight:700;color:#a5b4fc;display:flex;align-items:center;justify-content:space-between}}
+.nav-drawer-item{{padding:14px 20px;font-size:14px;font-weight:500;color:#94a3b8;cursor:pointer;border-bottom:1px solid #0d1117;transition:background .15s}}
+.nav-drawer-item:hover,.nav-drawer-item.active{{background:#1e2942;color:#a5b4fc}}
+.nav-drawer-item.active{{border-left:3px solid #6366f1;padding-left:17px}}
+
+/* ── Bottom nav (mobile) ── */
+.bottom-nav{{display:none;position:fixed;bottom:0;left:0;right:0;background:#0d1117;border-top:1px solid #1e2942;z-index:1000;padding:0;padding-bottom:env(safe-area-inset-bottom)}}
+.bottom-nav-items{{display:flex;justify-content:space-around}}
+.bn-item{{flex:1;display:flex;flex-direction:column;align-items:center;padding:8px 4px 6px;cursor:pointer;color:#475569;font-size:9px;font-weight:500;transition:color .15s;gap:3px;border-top:2px solid transparent}}
+.bn-item.active{{color:#a5b4fc;border-top-color:#6366f1}}
+.bn-item svg{{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8}}
+
+/* ── Layout ── */
 .main{{flex:1;padding:16px 20px}}
 .screen{{display:none}}.screen.active{{display:block}}
 .grid{{display:grid;gap:14px}}
 .g2{{grid-template-columns:repeat(2,1fr)}}.g3{{grid-template-columns:repeat(3,1fr)}}
 .g4{{grid-template-columns:repeat(4,1fr)}}.g5{{grid-template-columns:repeat(5,1fr)}}
 .g6{{grid-template-columns:repeat(6,1fr)}}
-@media(max-width:900px){{.g2,.g3,.g4,.g5,.g6{{grid-template-columns:1fr}}}}
 @media(min-width:901px) and (max-width:1200px){{.g6{{grid-template-columns:repeat(3,1fr)}}.g5{{grid-template-columns:repeat(3,1fr)}}}}
+@media(max-width:900px){{.g3,.g4,.g5{{grid-template-columns:repeat(2,1fr)}}.g6{{grid-template-columns:repeat(3,1fr)}}}}
+@media(max-width:600px){{.g2,.g3,.g4,.g5,.g6{{grid-template-columns:repeat(2,1fr)}}}}
+@media(max-width:400px){{.g2,.g3,.g4,.g5,.g6{{grid-template-columns:1fr}}}}
+
+/* ── Cards ── */
 .card{{background:#111827;border:1px solid #1e2942;border-radius:12px;padding:16px}}
 .stat-big{{font-size:28px;font-weight:700;line-height:1}}
 .stat-label{{font-size:11px;color:#64748b;margin-top:4px}}
 .stat-sub{{font-size:10px;color:#334155;margin-top:2px}}
+
+/* ── Tables responsive ── */
+.table-wrap{{overflow-x:auto;-webkit-overflow-scrolling:touch}}
 table{{width:100%;border-collapse:collapse;font-size:13px}}
 td,th{{padding:8px;border-bottom:1px solid #1e2942}}
 th{{color:#64748b;font-size:11px;text-transform:uppercase;font-weight:600}}
 tr:last-child td{{border-bottom:none}}
+
+/* ── Components ── */
 .gauge{{margin-bottom:12px}}
 .container-card{{background:#0a0d14;border:1px solid #1e2942;border-radius:8px;padding:10px 12px;margin-bottom:6px}}
 .tab-btn{{background:#0a0d14;border:1px solid #1e2942;color:#64748b;padding:6px 16px;border-radius:6px;font-size:12px;cursor:pointer;transition:all .2s}}
 .tab-btn:hover{{border-color:#4338ca;color:#a5b4fc}}
 .tab-active{{background:#1e1b4b;border-color:#4338ca;color:#a5b4fc;font-weight:600}}
-.btn-danger{{background:#7f1d1d;border:none;color:#fca5a5;padding:2px 8px;border-radius:4px;font-size:10px;cursor:pointer;margin-left:6px}}
-.btn-success{{background:#14532d;border:none;color:#86efac;padding:2px 6px;border-radius:4px;font-size:10px;cursor:pointer;margin-left:4px}}
-.btn-primary{{background:#312e81;border:1px solid #4338ca;color:#a5b4fc;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer}}
+.btn-danger{{background:#7f1d1d;border:none;color:#fca5a5;padding:5px 10px;border-radius:4px;font-size:11px;cursor:pointer;margin-left:6px;min-height:30px;touch-action:manipulation}}
+.btn-success{{background:#14532d;border:none;color:#86efac;padding:5px 8px;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;min-height:30px;touch-action:manipulation}}
+.btn-primary{{background:#312e81;border:1px solid #4338ca;color:#a5b4fc;padding:8px 16px;border-radius:6px;font-size:12px;cursor:pointer;min-height:36px;touch-action:manipulation}}
 .badge{{padding:2px 7px;border-radius:4px;font-size:11px;font-weight:500}}
 .badge-red{{background:#dc2626;color:#fff}}.badge-orange{{background:#d97706;color:#fff}}
 .badge-purple{{background:#7c3aed;color:#fff}}.badge-gray{{background:#334155;color:#94a3b8}}
@@ -797,32 +829,79 @@ tr:last-child td{{border-bottom:none}}
 .alert-banner{{border-radius:8px;padding:10px 16px;margin-bottom:10px;font-weight:600;font-size:13px}}
 .alert-crit{{background:#450a0a;border:1px solid #dc2626;color:#fca5a5}}
 .alert-warn{{background:#451a03;border:1px solid #d97706;color:#fcd34d}}
+
+/* ── Géo map ── */
 #geomap{{height:460px;border-radius:8px;background:#0a0d14}}
 .leaflet-tile{{filter:brightness(0.55) saturate(0.35)}}
 .leaflet-container{{background:#0a0d14}}
 .leaflet-popup-content-wrapper{{background:#1e2942;border:1px solid #334155;color:#e2e8f0;border-radius:8px}}
 .leaflet-popup-tip{{background:#1e2942}}
-/* Heatmap */
-.heatmap-grid{{display:grid;grid-template-columns:40px repeat(24,1fr);gap:2px;font-size:9px}}
+
+/* ── Heatmap ── */
+.heatmap-wrap{{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-top:4px}}
+.heatmap-grid{{display:grid;grid-template-columns:40px repeat(24,1fr);gap:2px;font-size:9px;min-width:480px}}
 .hm-cell{{height:22px;border-radius:3px;cursor:default;transition:opacity .15s}}
 .hm-cell:hover{{opacity:0.75;outline:1px solid #fff}}
 .hm-label{{display:flex;align-items:center;justify-content:flex-end;padding-right:6px;color:#475569;font-size:10px;height:22px}}
 .hm-hour{{text-align:center;color:#334155;padding-bottom:4px}}
-/* Filtres */
+
+/* ── Filtres ── */
 .filter-bar{{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}}
-.filter-btn{{background:#1e2942;border:1px solid #334155;color:#64748b;padding:4px 12px;border-radius:6px;font-size:11px;cursor:pointer;transition:all .15s}}
+.filter-btn{{background:#1e2942;border:1px solid #334155;color:#64748b;padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;transition:all .15s;min-height:34px;touch-action:manipulation}}
 .filter-btn:hover{{border-color:#4338ca;color:#a5b4fc}}
 .filter-btn.active{{background:#1e1b4b;border-color:#4338ca;color:#a5b4fc;font-weight:600}}
-.search-input{{background:#0a0d14;border:1px solid #1e2942;color:#e2e8f0;padding:6px 12px;border-radius:6px;font-size:12px;width:200px;outline:none}}
+.search-input{{background:#0a0d14;border:1px solid #1e2942;color:#e2e8f0;padding:7px 12px;border-radius:6px;font-size:13px;flex:1;min-width:120px;outline:none}}
 .search-input:focus{{border-color:#4338ca}}
-#toast{{display:none;position:fixed;bottom:20px;right:20px;padding:10px 18px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.5)}}
+
+/* ── Toast ── */
+#toast{{display:none;position:fixed;bottom:20px;right:20px;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.5);max-width:calc(100vw - 40px)}}
+
+/* ── Mobile overrides ── */
+@media(max-width:768px){{
+  .topbar{{padding:0 12px}}
+  .nav-item{{display:none}}
+  .topbar-hostname{{display:none}}
+  .hamburger{{display:block}}
+  .topbar-right{{gap:6px}}
+  .threat-badge{{font-size:11px;padding:4px 8px}}
+  .main{{padding:12px;padding-bottom:80px}}
+  .card{{padding:12px;border-radius:10px}}
+  .stat-big{{font-size:24px}}
+  #geomap{{height:300px}}
+  .bottom-nav{{display:block}}
+  .btn-danger,.btn-success{{padding:8px 10px;min-height:36px}}
+  .search-input{{font-size:16px}}
+}}
+@media(max-width:480px){{
+  .topbar-brand span{{display:none}}
+  .threat-badge{{font-size:10px;padding:3px 7px}}
+}}
 </style>
 </head><body>
 <div id="toast"></div>
 
-<!-- ═══ NAVIGATION ═══ -->
+<!-- ═══ NAV DRAWER (mobile) ═══ -->
+<div class="nav-overlay" id="nav-overlay" onclick="closeDrawer()"></div>
+<div class="nav-drawer" id="nav-drawer">
+  <div class="nav-drawer-header">
+    <span>🛡️ ViaDigiTech SOC</span>
+    <button onclick="closeDrawer()" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer">✕</button>
+  </div>
+  <div class="nav-drawer-item active" onclick="showScreen('overview');closeDrawer()"    id="dnav-overview">🏠 Vue globale</div>
+  <div class="nav-drawer-item"        onclick="showScreen('security');closeDrawer()"    id="dnav-security">🔒 Sécurité</div>
+  <div class="nav-drawer-item"        onclick="showScreen('performance');closeDrawer()" id="dnav-performance">📈 Performance</div>
+  <div class="nav-drawer-item"        onclick="showScreen('timeline');closeDrawer()"    id="dnav-timeline">🕒 Timeline</div>
+  <div class="nav-drawer-item"        onclick="showScreen('infra');closeDrawer()"       id="dnav-infra">🖥️ Infrastructure</div>
+  <div style="padding:16px 20px;border-top:1px solid #1e2942;margin-top:auto">
+    <div style="font-size:11px;color:#334155;margin-bottom:8px">{hostname} · {now.strftime('%d/%m %H:%M')}</div>
+    <div class="threat-badge" style="display:inline-block;background:{threat_bg};color:{threat_color};border-color:{threat_color}">{threat}/100 — {threat_label}</div>
+  </div>
+</div>
+
+<!-- ═══ NAVIGATION DESKTOP ═══ -->
 <nav class="topbar">
-  <div class="topbar-brand">🛡️ ViaDigiTech SOC</div>
+  <button class="hamburger" onclick="openDrawer()">☰</button>
+  <div class="topbar-brand">🛡️ <span>ViaDigiTech SOC</span></div>
   <div class="nav-item active" onclick="showScreen('overview')"    id="nav-overview">Vue globale</div>
   <div class="nav-item"        onclick="showScreen('security')"    id="nav-security">Sécurité</div>
   <div class="nav-item"        onclick="showScreen('performance')" id="nav-performance">Performance</div>
@@ -834,7 +913,33 @@ tr:last-child td{{border-bottom:none}}
       {threat}/100 — {threat_label}
     </div>
     {svc_badge}
-    <span style="font-size:11px;color:#334155">{hostname} · {now.strftime('%d/%m %H:%M')}</span>
+    <span class="topbar-hostname">{hostname} · {now.strftime('%d/%m %H:%M')}</span>
+  </div>
+</nav>
+
+<!-- ═══ BOTTOM NAV (mobile) ═══ -->
+<nav class="bottom-nav">
+  <div class="bottom-nav-items">
+    <div class="bn-item active" onclick="showScreen('overview')"    id="bn-overview">
+      <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      Vue glob.
+    </div>
+    <div class="bn-item" onclick="showScreen('security')"    id="bn-security">
+      <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      Sécurité
+    </div>
+    <div class="bn-item" onclick="showScreen('performance')" id="bn-performance">
+      <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Perfo
+    </div>
+    <div class="bn-item" onclick="showScreen('timeline')"    id="bn-timeline">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      Timeline
+    </div>
+    <div class="bn-item" onclick="showScreen('infra')"       id="bn-infra">
+      <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      Infra
+    </div>
   </div>
 </nav>
 
@@ -890,12 +995,12 @@ tr:last-child td{{border-bottom:none}}
   <div class="grid g2" style="margin-bottom:14px">
     <div class="card">
       <h2>Top IPs attaquantes 24h</h2>
-      {"<div style='color:#475569;font-size:13px;padding:12px 0'>Aucune activité SSH suspecte</div>" if not top_ip_rows else f"<div style='max-height:360px;overflow-y:auto'><table id='ip-table'><thead><tr><th>IP</th><th style='text-align:right'>Tentatives</th></tr></thead><tbody>{top_ip_rows}</tbody></table></div>"}
-      {f'<div style="margin-top:14px;padding-top:12px;border-top:1px solid #1e2942"><h2>Connexions légitimes 24h</h2><table><thead><tr><th></th><th>IP</th><th>Utilisateur</th><th>Heure</th></tr></thead><tbody>{accepted_html}</tbody></table></div>' if accepted_html else ""}
+      {"<div style='color:#475569;font-size:13px;padding:12px 0'>Aucune activité SSH suspecte</div>" if not top_ip_rows else f"<div class='table-wrap' style='max-height:360px;overflow-y:auto'><table id='ip-table'><thead><tr><th>IP</th><th style='text-align:right'>Tentatives</th></tr></thead><tbody>{top_ip_rows}</tbody></table></div>"}
+      {f'<div style="margin-top:14px;padding-top:12px;border-top:1px solid #1e2942"><h2>Connexions légitimes 24h</h2><div class="table-wrap"><table><thead><tr><th></th><th>IP</th><th>Utilisateur</th><th>Heure</th></tr></thead><tbody>{accepted_html}</tbody></table></div></div>' if accepted_html else ""}
     </div>
     <div class="card">
       <h2>Journal d'audit</h2>
-      {"<div style='color:#475569;font-size:13px;padding:12px 0'>Aucune action enregistrée</div>" if not audit_html else f"<div style='max-height:360px;overflow-y:auto'><table id='audit-table'><thead><tr><th>Heure</th><th>IP</th><th>Action</th><th style='text-align:right'>Score</th></tr></thead><tbody>{audit_html}</tbody></table></div>"}
+      {"<div style='color:#475569;font-size:13px;padding:12px 0'>Aucune action enregistrée</div>" if not audit_html else f"<div class='table-wrap' style='max-height:360px;overflow-y:auto'><table id='audit-table'><thead><tr><th>Heure</th><th>IP</th><th>Action</th><th style='text-align:right'>Score</th></tr></thead><tbody>{audit_html}</tbody></table></div>"}
     </div>
   </div>
 
@@ -905,7 +1010,7 @@ tr:last-child td{{border-bottom:none}}
       <h2 style="margin:0">Corrélation par sous-réseau /24</h2>
       <span style="font-size:11px;color:#334155">{len(subnets)} blocs détectés</span>
     </div>
-    {"<div style='color:#475569;font-size:13px;padding:8px 0'>Aucune corrélation détectée</div>" if not subnet_rows else f"<table><thead><tr><th>Sous-réseau</th><th style='text-align:center'>IPs uniques</th><th style='text-align:right'>Tentatives</th></tr></thead><tbody>{subnet_rows}</tbody></table>"}
+    {"<div style='color:#475569;font-size:13px;padding:8px 0'>Aucune corrélation détectée</div>" if not subnet_rows else f"<div class='table-wrap'><table><thead><tr><th>Sous-réseau</th><th style='text-align:center'>IPs uniques</th><th style='text-align:right'>Tentatives</th></tr></thead><tbody>{subnet_rows}</tbody></table></div>"}
   </div>
 </div>
 
@@ -917,7 +1022,7 @@ tr:last-child td{{border-bottom:none}}
   </div>
   <div class="card" style="margin-bottom:14px">
     <h2>Heatmap des attaques SSH — 7 jours × 24 heures</h2>
-    <div style="overflow-x:auto;padding-top:4px">
+    <div class="heatmap-wrap">
       <div id="heatmap-container"></div>
     </div>
     <div style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:10px;color:#475569">
@@ -977,7 +1082,7 @@ tr:last-child td{{border-bottom:none}}
         <h2 style="margin:0">Whitelist Fail2Ban</h2>
         {'<button onclick="addWhitelist()" class="btn-primary" style="font-size:11px;padding:4px 12px">+ Ajouter IP</button>' if ACTIONS_KEY else ''}
       </div>
-      {"<div style='color:#475569;font-size:13px;padding:8px 0'>Whitelist vide</div>" if not whitelist_html else f"<table><thead><tr><th>IP / Réseau</th><th></th></tr></thead><tbody>{whitelist_html}</tbody></table>"}
+      {"<div style='color:#475569;font-size:13px;padding:8px 0'>Whitelist vide</div>" if not whitelist_html else f"<div class='table-wrap'><table><thead><tr><th>IP / Réseau</th><th></th></tr></thead><tbody>{whitelist_html}</tbody></table></div>"}
     </div>
     <div class="card">
       <h2>Conteneurs Docker — {len(containers)} · {sum(1 for c in containers if 'Up' in c.get('Status',''))} actifs</h2>
@@ -998,14 +1103,28 @@ tr:last-child td{{border-bottom:none}}
 // ── Navigation ──
 function showScreen(id){{
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.querySelectorAll('.nav-item,.bn-item,.nav-drawer-item').forEach(n=>n.classList.remove('active'));
   document.getElementById('screen-'+id).classList.add('active');
-  document.getElementById('nav-'+id).classList.add('active');
+  const di=document.getElementById('nav-'+id);   if(di)di.classList.add('active');
+  const bi=document.getElementById('bn-'+id);    if(bi)bi.classList.add('active');
+  const ddi=document.getElementById('dnav-'+id); if(ddi)ddi.classList.add('active');
   if(id==='security'&&window._leafletMap) setTimeout(()=>window._leafletMap.invalidateSize(),50);
   if(id==='performance') setTimeout(()=>window.dispatchEvent(new Event('resize')),50);
   sessionStorage.setItem('soc_screen',id);
 }}
 (function(){{const s=sessionStorage.getItem('soc_screen');if(s)showScreen(s);}})();
+
+// ── Drawer mobile ──
+function openDrawer(){{
+  document.getElementById('nav-drawer').classList.add('open');
+  document.getElementById('nav-overlay').classList.add('open');
+  document.body.style.overflow='hidden';
+}}
+function closeDrawer(){{
+  document.getElementById('nav-drawer').classList.remove('open');
+  document.getElementById('nav-overlay').classList.remove('open');
+  document.body.style.overflow='';
+}}
 
 // ── Onglets IA ──
 function showTab(id){{
