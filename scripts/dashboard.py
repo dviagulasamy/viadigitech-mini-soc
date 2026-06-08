@@ -488,10 +488,11 @@ def build_html():
     services_cards = ""
     for label, status in srv_status:
         ok = status == "active"
-        services_cards += f"""<div style="background:{'#0d2318' if ok else '#2d0a0a'};border:1px solid {'#166534' if ok else '#7f1d1d'};border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:10px">
-          <span style="color:{'#22c55e' if ok else '#ef4444'};font-size:16px">{'●' if ok else '✕'}</span>
+        dot = '<span class="dot-active"></span>' if ok else '<span class="dot-down"></span>'
+        services_cards += f"""<div style="background:{'#05160e' if ok else '#180808'};border:1px solid {'#166534' if ok else '#7f1d1d'};border-radius:10px;padding:12px 14px;display:flex;align-items:center;gap:10px;transition:border-color .2s">
+          {dot}
           <div><div style="font-size:12px;font-weight:600;color:#e2e8f0">{label}</div>
-          <div style="font-size:10px;color:{'#22c55e' if ok else '#ef4444'}">{status}</div></div>
+          <div style="font-size:10px;color:{'#4ade80' if ok else '#f87171'};margin-top:2px">{status}</div></div>
         </div>"""
 
     # ── Alertes ──
@@ -756,41 +757,54 @@ async function askAI(){{
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
+/* ── Reset & base ── */
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:-apple-system,'Segoe UI',sans-serif;background:#0a0d14;color:#e2e8f0;display:flex;flex-direction:column;min-height:100vh}}
-h2{{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#475569;margin-bottom:12px;font-weight:600}}
+:root{{--bg:#0a0d14;--bg2:#0d1117;--bg3:#111827;--border:#1e2942;--border2:#2d3f5e;--text:#e2e8f0;--muted:#64748b;--dim:#334155;--accent:#6366f1;--accent-light:#a5b4fc;--red:#ef4444;--orange:#f59e0b;--green:#22c55e}}
+body{{font-family:-apple-system,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;min-height:100vh;font-variant-numeric:tabular-nums}}
+h2{{font-size:10px;text-transform:uppercase;letter-spacing:1.8px;color:var(--muted);margin-bottom:14px;font-weight:700}}
 
-/* ── Topbar desktop ── */
-.topbar{{background:#0d1117;border-bottom:1px solid #1e2942;padding:0 20px;display:flex;align-items:center;position:sticky;top:0;z-index:1000}}
-.topbar-brand{{font-size:14px;font-weight:700;color:#a5b4fc;padding:14px 16px 14px 0;border-right:1px solid #1e2942;margin-right:8px;white-space:nowrap}}
-.nav-item{{padding:14px 14px;font-size:12px;font-weight:500;color:#475569;cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;white-space:nowrap;user-select:none}}
-.nav-item:hover{{color:#94a3b8;border-bottom-color:#334155}}
-.nav-item.active{{color:#a5b4fc;border-bottom-color:#6366f1;font-weight:600}}
-.topbar-right{{margin-left:auto;display:flex;align-items:center;gap:10px;padding-left:12px}}
-.topbar-hostname{{font-size:11px;color:#334155}}
-.threat-badge{{padding:4px 12px;border-radius:20px;font-size:12px;font-weight:700;border:1px solid}}
+/* ── Scrollbar ── */
+::-webkit-scrollbar{{width:5px;height:5px}}
+::-webkit-scrollbar-track{{background:var(--bg)}}
+::-webkit-scrollbar-thumb{{background:var(--dim);border-radius:3px}}
+::-webkit-scrollbar-thumb:hover{{background:#475569}}
+
+/* ── Topbar ── */
+.topbar{{background:linear-gradient(90deg,var(--bg2) 0%,#0f1520 100%);border-bottom:1px solid var(--border);padding:0 24px;display:flex;align-items:center;position:sticky;top:0;z-index:1000;backdrop-filter:blur(8px)}}
+.topbar-brand{{font-size:14px;font-weight:800;color:var(--accent-light);padding:14px 18px 14px 0;border-right:1px solid var(--border);margin-right:10px;white-space:nowrap;letter-spacing:-0.3px}}
+.nav-item{{padding:16px 14px 14px;font-size:12px;font-weight:500;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;transition:color .18s,border-color .18s;white-space:nowrap;user-select:none;position:relative}}
+.nav-item:hover{{color:#94a3b8}}
+.nav-item.active{{color:var(--accent-light);border-bottom-color:var(--accent);font-weight:600}}
+.topbar-right{{margin-left:auto;display:flex;align-items:center;gap:10px;padding-left:14px}}
+.topbar-hostname{{font-size:11px;color:var(--dim)}}
+.threat-badge{{padding:5px 13px;border-radius:20px;font-size:11px;font-weight:700;border:1px solid;letter-spacing:.3px}}
 
 /* ── Hamburger (mobile only) ── */
-.hamburger{{display:none;background:none;border:none;color:#94a3b8;font-size:22px;cursor:pointer;padding:10px 8px;line-height:1}}
-.nav-drawer{{display:none;position:fixed;top:0;left:0;width:72%;max-width:260px;height:100vh;background:#0d1117;border-right:1px solid #1e2942;z-index:2000;flex-direction:column;padding:0;overflow-y:auto;transform:translateX(-100%);transition:transform .25s ease}}
+.hamburger{{display:none;background:none;border:none;color:#94a3b8;font-size:22px;cursor:pointer;padding:10px 8px;line-height:1;touch-action:manipulation}}
+
+/* ── Nav drawer — FIX: display:flex always, transform pour cacher ── */
+.nav-drawer{{display:flex;flex-direction:column;position:fixed;top:0;left:0;width:72%;max-width:270px;height:100vh;background:var(--bg2);border-right:1px solid var(--border);z-index:2000;padding:0;overflow-y:auto;transform:translateX(-100%);transition:transform .28s cubic-bezier(.4,0,.2,1);box-shadow:4px 0 24px rgba(0,0,0,.5)}}
 .nav-drawer.open{{transform:translateX(0)}}
-.nav-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1999}}
+.nav-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1999;backdrop-filter:blur(2px)}}
 .nav-overlay.open{{display:block}}
-.nav-drawer-header{{padding:16px 20px;border-bottom:1px solid #1e2942;font-size:14px;font-weight:700;color:#a5b4fc;display:flex;align-items:center;justify-content:space-between}}
-.nav-drawer-item{{padding:14px 20px;font-size:14px;font-weight:500;color:#94a3b8;cursor:pointer;border-bottom:1px solid #0d1117;transition:background .15s}}
-.nav-drawer-item:hover,.nav-drawer-item.active{{background:#1e2942;color:#a5b4fc}}
-.nav-drawer-item.active{{border-left:3px solid #6366f1;padding-left:17px}}
+.nav-drawer-header{{padding:18px 20px;border-bottom:1px solid var(--border);font-size:14px;font-weight:800;color:var(--accent-light);display:flex;align-items:center;justify-content:space-between;letter-spacing:-0.3px}}
+.nav-drawer-item{{padding:15px 20px;font-size:13px;font-weight:500;color:#94a3b8;cursor:pointer;border-bottom:1px solid rgba(30,41,66,.5);transition:background .15s,color .15s;touch-action:manipulation}}
+.nav-drawer-item:active{{background:#1a2436}}
+.nav-drawer-item:hover,.nav-drawer-item.active{{background:var(--border);color:var(--accent-light)}}
+.nav-drawer-item.active{{border-left:3px solid var(--accent);padding-left:17px;font-weight:600}}
 
 /* ── Bottom nav (mobile) ── */
-.bottom-nav{{display:none;position:fixed;bottom:0;left:0;right:0;background:#0d1117;border-top:1px solid #1e2942;z-index:1000;padding:0;padding-bottom:env(safe-area-inset-bottom)}}
+.bottom-nav{{display:none;position:fixed;bottom:0;left:0;right:0;background:rgba(13,17,23,.95);border-top:1px solid var(--border);z-index:1000;padding-bottom:env(safe-area-inset-bottom);backdrop-filter:blur(12px)}}
 .bottom-nav-items{{display:flex;justify-content:space-around}}
-.bn-item{{flex:1;display:flex;flex-direction:column;align-items:center;padding:8px 4px 6px;cursor:pointer;color:#475569;font-size:9px;font-weight:500;transition:color .15s;gap:3px;border-top:2px solid transparent}}
-.bn-item.active{{color:#a5b4fc;border-top-color:#6366f1}}
+.bn-item{{flex:1;display:flex;flex-direction:column;align-items:center;padding:9px 4px 7px;cursor:pointer;color:var(--muted);font-size:9px;font-weight:500;transition:color .15s;gap:3px;border-top:2px solid transparent;touch-action:manipulation}}
+.bn-item.active{{color:var(--accent-light);border-top-color:var(--accent)}}
 .bn-item svg{{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.8}}
 
 /* ── Layout ── */
-.main{{flex:1;padding:16px 20px}}
-.screen{{display:none}}.screen.active{{display:block}}
+.main{{flex:1;padding:18px 24px;max-width:1600px;width:100%;margin:0 auto}}
+.screen{{display:none;animation:fadeIn .2s ease}}
+.screen.active{{display:block}}
+@keyframes fadeIn{{from{{opacity:0;transform:translateY(4px)}}to{{opacity:1;transform:translateY(0)}}}}
 .grid{{display:grid;gap:14px}}
 .g2{{grid-template-columns:repeat(2,1fr)}}.g3{{grid-template-columns:repeat(3,1fr)}}
 .g4{{grid-template-columns:repeat(4,1fr)}}.g5{{grid-template-columns:repeat(5,1fr)}}
@@ -801,60 +815,79 @@ h2{{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:#475569;m
 @media(max-width:400px){{.g2,.g3,.g4,.g5,.g6{{grid-template-columns:1fr}}}}
 
 /* ── Cards ── */
-.card{{background:#111827;border:1px solid #1e2942;border-radius:12px;padding:16px}}
-.stat-big{{font-size:28px;font-weight:700;line-height:1}}
-.stat-label{{font-size:11px;color:#64748b;margin-top:4px}}
-.stat-sub{{font-size:10px;color:#334155;margin-top:2px}}
+.card{{background:var(--bg3);border:1px solid var(--border);border-radius:14px;padding:18px;transition:border-color .2s,box-shadow .2s}}
+.card:hover{{border-color:var(--border2);box-shadow:0 2px 16px rgba(99,102,241,.06)}}
+.stat-big{{font-size:30px;font-weight:800;line-height:1;letter-spacing:-1px}}
+.stat-label{{font-size:11px;color:var(--muted);margin-top:5px;font-weight:500}}
+.stat-sub{{font-size:10px;color:var(--dim);margin-top:3px}}
 
-/* ── Tables responsive ── */
+/* ── Tables ── */
 .table-wrap{{overflow-x:auto;-webkit-overflow-scrolling:touch}}
-table{{width:100%;border-collapse:collapse;font-size:13px}}
-td,th{{padding:8px;border-bottom:1px solid #1e2942}}
-th{{color:#64748b;font-size:11px;text-transform:uppercase;font-weight:600}}
+table{{width:100%;border-collapse:collapse;font-size:12.5px}}
+td,th{{padding:9px 8px;border-bottom:1px solid var(--border)}}
+th{{color:var(--muted);font-size:10px;text-transform:uppercase;font-weight:700;letter-spacing:.8px}}
+tbody tr{{transition:background .12s}}
+tbody tr:hover{{background:rgba(30,41,66,.4)}}
 tr:last-child td{{border-bottom:none}}
 
+/* ── Gauge ── */
+.gauge{{margin-bottom:14px}}
+.gauge-bar{{background:#1e2942;border-radius:4px;overflow:hidden;height:6px;margin-top:5px}}
+.gauge-fill{{height:6px;border-radius:4px;transition:width .6s ease}}
+
 /* ── Components ── */
-.gauge{{margin-bottom:12px}}
-.container-card{{background:#0a0d14;border:1px solid #1e2942;border-radius:8px;padding:10px 12px;margin-bottom:6px}}
-.tab-btn{{background:#0a0d14;border:1px solid #1e2942;color:#64748b;padding:6px 16px;border-radius:6px;font-size:12px;cursor:pointer;transition:all .2s}}
-.tab-btn:hover{{border-color:#4338ca;color:#a5b4fc}}
-.tab-active{{background:#1e1b4b;border-color:#4338ca;color:#a5b4fc;font-weight:600}}
-.btn-danger{{background:#7f1d1d;border:none;color:#fca5a5;padding:5px 10px;border-radius:4px;font-size:11px;cursor:pointer;margin-left:6px;min-height:30px;touch-action:manipulation}}
-.btn-success{{background:#14532d;border:none;color:#86efac;padding:5px 8px;border-radius:4px;font-size:11px;cursor:pointer;margin-left:4px;min-height:30px;touch-action:manipulation}}
-.btn-primary{{background:#312e81;border:1px solid #4338ca;color:#a5b4fc;padding:8px 16px;border-radius:6px;font-size:12px;cursor:pointer;min-height:36px;touch-action:manipulation}}
-.badge{{padding:2px 7px;border-radius:4px;font-size:11px;font-weight:500}}
-.badge-red{{background:#dc2626;color:#fff}}.badge-orange{{background:#d97706;color:#fff}}
-.badge-purple{{background:#7c3aed;color:#fff}}.badge-gray{{background:#334155;color:#94a3b8}}
-.badge-green{{background:#166534;color:#86efac}}
-.alert-banner{{border-radius:8px;padding:10px 16px;margin-bottom:10px;font-weight:600;font-size:13px}}
+.container-card{{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:6px;transition:border-color .15s}}
+.container-card:hover{{border-color:var(--border2)}}
+.tab-btn{{background:var(--bg);border:1px solid var(--border);color:var(--muted);padding:6px 16px;border-radius:6px;font-size:12px;cursor:pointer;transition:all .18s;touch-action:manipulation}}
+.tab-btn:hover{{border-color:var(--accent);color:var(--accent-light)}}
+.tab-active{{background:#1e1b4b;border-color:var(--accent);color:var(--accent-light);font-weight:600}}
+.btn-danger{{background:#7f1d1d;border:1px solid #991b1b;color:#fca5a5;padding:6px 12px;border-radius:6px;font-size:11px;cursor:pointer;margin-left:6px;min-height:32px;touch-action:manipulation;transition:background .15s}}
+.btn-danger:hover{{background:#991b1b}}
+.btn-success{{background:#14532d;border:1px solid #166534;color:#86efac;padding:6px 10px;border-radius:6px;font-size:11px;cursor:pointer;margin-left:4px;min-height:32px;touch-action:manipulation;transition:background .15s}}
+.btn-success:hover{{background:#166534}}
+.btn-primary{{background:#312e81;border:1px solid var(--accent);color:var(--accent-light);padding:8px 18px;border-radius:8px;font-size:12px;cursor:pointer;min-height:36px;touch-action:manipulation;transition:background .15s,box-shadow .15s;font-weight:500}}
+.btn-primary:hover{{background:#3730a3;box-shadow:0 0 0 3px rgba(99,102,241,.2)}}
+.badge{{padding:3px 8px;border-radius:5px;font-size:11px;font-weight:600}}
+.badge-red{{background:#450a0a;color:#fca5a5;border:1px solid #7f1d1d}}
+.badge-orange{{background:#451a03;color:#fcd34d;border:1px solid #92400e}}
+.badge-purple{{background:#2e1065;color:#c4b5fd;border:1px solid #6d28d9}}
+.badge-gray{{background:var(--border);color:#94a3b8;border:1px solid var(--border2)}}
+.badge-green{{background:#052e16;color:#86efac;border:1px solid #166534}}
+.alert-banner{{border-radius:10px;padding:12px 18px;margin-bottom:12px;font-weight:600;font-size:13px;display:flex;align-items:center;gap:10px}}
 .alert-crit{{background:#450a0a;border:1px solid #dc2626;color:#fca5a5}}
 .alert-warn{{background:#451a03;border:1px solid #d97706;color:#fcd34d}}
 
+/* ── Pulsing dot (service actif) ── */
+@keyframes pulse{{0%,100%{{opacity:1}}50%{{opacity:.4}}}}
+.dot-active{{display:inline-block;width:8px;height:8px;background:var(--green);border-radius:50%;animation:pulse 2s infinite;flex-shrink:0}}
+.dot-down{{display:inline-block;width:8px;height:8px;background:var(--red);border-radius:50%;flex-shrink:0}}
+
 /* ── Géo map ── */
-#geomap{{height:460px;border-radius:8px;background:#0a0d14}}
-.leaflet-tile{{filter:brightness(0.55) saturate(0.35)}}
-.leaflet-container{{background:#0a0d14}}
-.leaflet-popup-content-wrapper{{background:#1e2942;border:1px solid #334155;color:#e2e8f0;border-radius:8px}}
+#geomap{{height:460px;border-radius:10px;background:var(--bg)}}
+.leaflet-tile{{filter:brightness(0.5) saturate(0.3)}}
+.leaflet-container{{background:var(--bg)}}
+.leaflet-popup-content-wrapper{{background:#1e2942;border:1px solid var(--border2);color:var(--text);border-radius:10px}}
 .leaflet-popup-tip{{background:#1e2942}}
 
 /* ── Heatmap ── */
 .heatmap-wrap{{overflow-x:auto;-webkit-overflow-scrolling:touch;padding-top:4px}}
-.heatmap-grid{{display:grid;grid-template-columns:40px repeat(24,1fr);gap:2px;font-size:9px;min-width:480px}}
-.hm-cell{{height:22px;border-radius:3px;cursor:default;transition:opacity .15s}}
-.hm-cell:hover{{opacity:0.75;outline:1px solid #fff}}
-.hm-label{{display:flex;align-items:center;justify-content:flex-end;padding-right:6px;color:#475569;font-size:10px;height:22px}}
-.hm-hour{{text-align:center;color:#334155;padding-bottom:4px}}
+.heatmap-grid{{display:grid;grid-template-columns:44px repeat(24,1fr);gap:2px;font-size:9px;min-width:520px}}
+.hm-cell{{height:24px;border-radius:4px;cursor:default;transition:opacity .12s}}
+.hm-cell:hover{{opacity:.7;outline:1px solid rgba(255,255,255,.4)}}
+.hm-label{{display:flex;align-items:center;justify-content:flex-end;padding-right:8px;color:var(--muted);font-size:10px;height:24px;font-weight:500}}
+.hm-hour{{text-align:center;color:var(--dim);padding-bottom:5px;font-size:9px}}
 
 /* ── Filtres ── */
-.filter-bar{{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}}
-.filter-btn{{background:#1e2942;border:1px solid #334155;color:#64748b;padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;transition:all .15s;min-height:34px;touch-action:manipulation}}
-.filter-btn:hover{{border-color:#4338ca;color:#a5b4fc}}
-.filter-btn.active{{background:#1e1b4b;border-color:#4338ca;color:#a5b4fc;font-weight:600}}
-.search-input{{background:#0a0d14;border:1px solid #1e2942;color:#e2e8f0;padding:7px 12px;border-radius:6px;font-size:13px;flex:1;min-width:120px;outline:none}}
-.search-input:focus{{border-color:#4338ca}}
+.filter-bar{{display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap}}
+.filter-btn{{background:var(--border);border:1px solid var(--border2);color:var(--muted);padding:6px 16px;border-radius:8px;font-size:12px;cursor:pointer;transition:all .15s;min-height:34px;touch-action:manipulation;font-weight:500}}
+.filter-btn:hover{{border-color:var(--accent);color:var(--accent-light)}}
+.filter-btn.active{{background:#1e1b4b;border-color:var(--accent);color:var(--accent-light);font-weight:600}}
+.search-input{{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 14px;border-radius:8px;font-size:13px;flex:1;min-width:120px;outline:none;transition:border-color .18s}}
+.search-input:focus{{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.12)}}
+.search-input::placeholder{{color:var(--dim)}}
 
 /* ── Toast ── */
-#toast{{display:none;position:fixed;bottom:20px;right:20px;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.5);max-width:calc(100vw - 40px)}}
+#toast{{display:none;position:fixed;bottom:24px;right:24px;padding:12px 22px;border-radius:10px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 8px 24px rgba(0,0,0,.6);max-width:calc(100vw - 48px);backdrop-filter:blur(8px)}}
 
 /* ── Mobile overrides ── */
 @media(max-width:768px){{
@@ -863,18 +896,19 @@ tr:last-child td{{border-bottom:none}}
   .topbar-hostname{{display:none}}
   .hamburger{{display:block}}
   .topbar-right{{gap:6px}}
-  .threat-badge{{font-size:11px;padding:4px 8px}}
-  .main{{padding:12px;padding-bottom:80px}}
-  .card{{padding:12px;border-radius:10px}}
-  .stat-big{{font-size:24px}}
-  #geomap{{height:300px}}
+  .threat-badge{{font-size:11px;padding:4px 9px}}
+  .main{{padding:12px;padding-bottom:88px}}
+  .card{{padding:13px;border-radius:12px}}
+  .stat-big{{font-size:26px}}
+  #geomap{{height:280px}}
   .bottom-nav{{display:block}}
-  .btn-danger,.btn-success{{padding:8px 10px;min-height:36px}}
+  .btn-danger,.btn-success{{padding:8px 12px;min-height:38px}}
   .search-input{{font-size:16px}}
+  #toast{{bottom:90px;right:12px;left:12px;text-align:center}}
 }}
 @media(max-width:480px){{
   .topbar-brand span{{display:none}}
-  .threat-badge{{font-size:10px;padding:3px 7px}}
+  .threat-badge{{font-size:10px;padding:4px 8px}}
 }}
 </style>
 </head><body>
