@@ -1089,7 +1089,7 @@ tr:last-child td{{border-bottom:none}}
 <div id="toast"></div>
 
 <!-- ═══ LOGIN ═══ -->
-<div class="login-overlay" id="login-overlay">
+<div class="login-overlay open" id="login-overlay">
   <div class="login-box" id="login-box">
     <div class="login-logo">🛡️</div>
     <div class="login-title">ViaDigiTech SOC</div>
@@ -1576,27 +1576,32 @@ tr:last-child td{{border-bottom:none}}
 async function doLogin(){{
   const key=document.getElementById('login-key').value.trim();
   if(!key)return;
+  document.getElementById('login-error').textContent="";
   try{{
-    const r=await fetch('/action/status',{{headers:{{'X-SOC-Key':key}}}});
-    if(r.ok){{
+    const r=await fetch('/action/ban',{{method:'POST',headers:{{'Content-Type':'application/json','X-SOC-Key':key}},body:JSON.stringify({{ip:'0.0.0.0',_check:true}})}});
+    // 400 = clé OK mais IP invalide = bonne clé ; 401/403 = clé invalide
+    if(r.status===400||r.ok){{
       sessionStorage.setItem('soc_api_key',key);
       document.getElementById('login-overlay').classList.remove('open');
+      setTimeout(()=>document.getElementById('login-key').value='',100);
     }}else{{
       const box=document.getElementById('login-box');
       document.getElementById('login-error').textContent="Clé invalide — réessayez";
       box.classList.remove('shake');void box.offsetWidth;box.classList.add('shake');
     }}
   }}catch(e){{
-    document.getElementById('login-error').textContent="Erreur réseau";
+    document.getElementById('login-error').textContent="Erreur réseau — vérifiez la connexion";
   }}
 }}
-document.addEventListener('DOMContentLoaded',function(){{
+// Exécution directe (script en fin de body, DOM déjà prêt)
+(function(){{
   const k=sessionStorage.getItem('soc_api_key');
-  if(!k){{
-    document.getElementById('login-overlay').classList.add('open');
-    setTimeout(()=>document.getElementById('login-key')?.focus(),100);
+  if(k){{
+    document.getElementById('login-overlay').classList.remove('open');
+  }}else{{
+    setTimeout(()=>document.getElementById('login-key')?.focus(),150);
   }}
-}});
+}})();
 document.getElementById('login-key')?.addEventListener('keydown',e=>{{if(e.key==='Enter')doLogin();}});
 
 // ── Settings panel ──
