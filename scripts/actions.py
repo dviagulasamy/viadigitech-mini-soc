@@ -9,8 +9,10 @@ import os
 import re
 import subprocess
 import threading
+import time
+import json
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response, stream_with_context
 from functools import wraps
 try:
     from flask_limiter import Limiter
@@ -20,6 +22,18 @@ except ImportError:
     _limiter_ok = False
 
 app = Flask(__name__)
+try:
+    from flasgger import Swagger
+    app.config['SWAGGER'] = {
+        'title': 'ViaDigiTech SOC API',
+        'uiversion': 3,
+        'specs_route': '/action/docs/'
+    }
+    Swagger(app)
+    _swagger_ok = True
+except ImportError:
+    _swagger_ok = False
+
 if _limiter_ok:
     limiter = Limiter(app, key_func=get_remote_address, default_limits=["60 per minute"])
 
@@ -55,11 +69,43 @@ def valid_ip(ip):
 
 @app.route("/status")
 def status():
+    """
+    Statut du SOC
+    ---
+    tags: [SOC]
+    security: [{ApiKeyAuth: []}]
+    responses:
+      200:
+        description: Métriques courantes
+    """
     return jsonify({"ok": True, "service": "SOC Actions API", "model": OLLAMA_MODEL})
 
 @app.route("/ban", methods=["POST"])
 @require_key
 def ban():
+    """
+    Bannir une IP via Fail2Ban
+    ---
+    tags: [SOC]
+    security: [{ApiKeyAuth: []}]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            ip:
+              type: string
+              example: "1.2.3.4"
+    responses:
+      200:
+        description: IP bannie avec succès
+      400:
+        description: IP invalide
+      403:
+        description: Clé API invalide
+    """
     ip = (request.json or {}).get("ip", "").strip()
     if not valid_ip(ip):
         return jsonify({"ok": False, "error": f"IP invalide : {ip}"}), 400
@@ -79,6 +125,29 @@ def ban():
 @app.route("/unban", methods=["POST"])
 @require_key
 def unban():
+    """
+    Débannir une IP via Fail2Ban
+    ---
+    tags: [SOC]
+    security: [{ApiKeyAuth: []}]
+    parameters:
+      - in: body
+        name: body
+        required: true
+        schema:
+          type: object
+          properties:
+            ip:
+              type: string
+              example: "1.2.3.4"
+    responses:
+      200:
+        description: IP débannie avec succès
+      400:
+        description: IP invalide
+      403:
+        description: Clé API invalide
+    """
     ip = (request.json or {}).get("ip", "").strip()
     if not valid_ip(ip):
         return jsonify({"ok": False, "error": f"IP invalide : {ip}"}), 400
@@ -171,6 +240,50 @@ def whitelist_remove():
         return jsonify({"ok": False, "error": r.stderr.strip() or "IP non trouvée dans la whitelist"})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+# ─────────────────────────────────────────
+# SSE — métriques live
+# ─────────────────────────────────────────
+
+def collect_live_metrics():
+    """Collecte métriques légères pour SSE (CPU, RAM, bans, menace)."""
+    import psutil
+    try:
+        bans = int(subprocess.run(
+            ["fail2ban-client", "status", "sshd"],
+            capture_output=True, text=True, timeout=5
+        ).stdout.split("Currently banned:")[1].split()[0]) if os.path.exists("/run/fail2ban/fail2ban.sock") else 0
+    except Exception:
+        bans = 0
+    return {
+        "cpu": psutil.cpu_percent(interval=1),
+        "ram": psutil.virtual_memory().percent,
+        "bans": bans,
+        "ts": int(time.time())
+    }
+
+@app.route("/stream")
+def sse_stream():
+    """SSE endpoint — métriques live toutes les 30s."""
+    api_key = request.headers.get("X-SOC-Key", "")
+    if ACTIONS_KEY and api_key != ACTIONS_KEY:
+        return jsonify({"error": "Unauthorized"}), 401
+    def generate():
+        while True:
+            try:
+                data = collect_live_metrics()
+                yield f"data: {json.dumps(data)}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            time.sleep(30)
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 # ─────────────────────────────────────────
 # Main

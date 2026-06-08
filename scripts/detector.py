@@ -25,9 +25,10 @@ MAIL_TO          = os.environ.get("SOC_MAIL_TO", "david@viadigitech.com").split(
 ABUSEIPDB_KEY    = os.environ.get("ABUSEIPDB_KEY", "")
 TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
-AUTH_LOG         = "/var/log/auth.log"
-STATE_FILE       = "/tmp/soc_detector_state.txt"
-AUDIT_LOG        = "/home/ubuntu/secops/audit_actions.csv"
+AUTH_LOG             = "/var/log/auth.log"
+STATE_FILE           = "/tmp/soc_detector_state.txt"
+AUDIT_LOG            = "/home/ubuntu/secops/audit_actions.csv"
+THREAT_PATTERNS_FILE = "/home/ubuntu/secops/threat_patterns.json"
 WINDOW_MIN       = 15   # fenêtre d'analyse en minutes
 
 # Mode : "dryrun" = mail de confirmation, "auto" = ban immédiat
@@ -177,11 +178,60 @@ def write_audit(ip, action, score, reason):
             f.write("timestamp,ip,action,score,reason\n")
         f.write(f"{datetime.now().isoformat()},{ip},{action},{score},{reason}\n")
 
+def load_threat_patterns():
+    """Charge le fichier de mémoire des patterns de menace."""
+    if not os.path.exists(THREAT_PATTERNS_FILE):
+        return {}
+    try:
+        with open(THREAT_PATTERNS_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def update_threat_patterns(ip, action, score):
+    """Met à jour la mémoire des patterns après chaque action."""
+    patterns = load_threat_patterns()
+    subnet = ".".join(ip.split(".")[:3]) + ".0/24"
+
+    # Entrée par IP
+    if ip not in patterns:
+        patterns[ip] = {"first_seen": datetime.now().isoformat()[:10], "bans": 0, "score_max": 0, "actions": []}
+    if action in ("BAN_AUTO", "BAN_OLLAMA"):
+        patterns[ip]["bans"] += 1
+    patterns[ip]["score_max"] = max(patterns[ip].get("score_max", 0), score)
+    patterns[ip]["actions"].append({"ts": datetime.now().isoformat()[:16], "action": action})
+    patterns[ip]["actions"] = patterns[ip]["actions"][-10:]  # garder 10 dernières
+
+    # Entrée par /24
+    if subnet not in patterns:
+        patterns[subnet] = {"first_seen": datetime.now().isoformat()[:10], "bans": 0, "ips": []}
+    if action in ("BAN_AUTO", "BAN_OLLAMA"):
+        patterns[subnet]["bans"] += 1
+    if ip not in patterns[subnet]["ips"]:
+        patterns[subnet]["ips"].append(ip)
+    patterns[subnet]["ips"] = patterns[subnet]["ips"][-20:]
+
+    try:
+        with open(THREAT_PATTERNS_FILE, "w") as f:
+            json.dump(patterns, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"[Patterns] Erreur écriture: {e}")
+
 def ollama_decide(ip, attempts, info):
     """
     Interroge qwen2.5:3b pour une décision sur une IP en zone grise (score 40-79%).
     Retourne {"action": "BAN"|"SURVEILLE"|"IGNORE", "raison": "...", "urgence": "..."}
     """
+    patterns = load_threat_patterns()
+    subnet = ".".join(ip.split(".")[:3]) + ".0/24"
+    ip_history = patterns.get(ip, {})
+    subnet_history = patterns.get(subnet, {})
+    history_ctx = ""
+    if ip_history.get("bans", 0) > 0:
+        history_ctx += f"\nHISTORIQUE IP: {ip_history['bans']} bans depuis {ip_history.get('first_seen','?')}."
+    if subnet_history.get("bans", 0) > 1:
+        history_ctx += f"\nHISTORIQUE /24: {subnet_history['bans']} bans sur ce sous-réseau."
+
     prompt = (
         f"Tu es un analyste SOC. Réponds UNIQUEMENT en JSON valide, sans texte autour.\n"
         f"Contexte:\n"
@@ -190,7 +240,7 @@ def ollama_decide(ip, attempts, info):
         f"- Score AbuseIPDB: {info['score']}%\n"
         f"- Pays: {info['country']}, FAI: {info['isp']}\n"
         f"- Nœud TOR: {info['isTor']}\n"
-        f"- Signalements totaux: {info['reports']}\n"
+        f"- Signalements totaux: {info['reports']}{history_ctx}\n"
         f"Format: {{\"action\": \"BAN\" ou \"SURVEILLE\" ou \"IGNORE\", "
         f"\"raison\": \"une phrase\", \"urgence\": \"haute\" ou \"moyenne\" ou \"faible\"}}"
     )
@@ -227,6 +277,8 @@ def enrich_and_act(top_ips):
             else:
                 action = "DRYRUN_BAN"
             write_audit(ip, action, score, reason)
+            if action == "BAN_AUTO":
+                update_threat_patterns(ip, "BAN_AUTO", score)
             actions.append({"ip": ip, "action": action, "score": score, "info": info, "reason": reason})
             print(f"[{'AutoBan' if AUTO_BAN_MODE == 'auto' else 'DryRun'}] {ip} — score {score}% → {action}")
             if action == "BAN_AUTO":
@@ -253,6 +305,8 @@ def enrich_and_act(top_ips):
                 action = f"OLLAMA_{ollama_action}"
 
             write_audit(ip, action, score, reason_full)
+            if action == "BAN_OLLAMA":
+                update_threat_patterns(ip, "BAN_OLLAMA", score)
             actions.append({
                 "ip": ip, "action": action, "score": score,
                 "info": info, "reason": reason_full,

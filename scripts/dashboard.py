@@ -484,6 +484,17 @@ def build_html():
     whitelist  = get_whitelist()
     threat     = compute_threat_score(metrics, ssh_total, bans_today, ban_count)
 
+    # ── Annotations ──
+    ann_path = "/home/ubuntu/secops/annotations.json"
+    if not os.path.exists(ann_path):
+        with open(ann_path, "w") as f: f.write("[]")
+    try:
+        with open(ann_path) as f:
+            annotations = json.load(f)
+    except Exception:
+        annotations = []
+    annotations_js = json.dumps(annotations)
+
     # ── Score menace ──
     if threat >= 70:
         threat_color, threat_label, threat_bg = "#ef4444", "ÉLEVÉE", "#450a0a"
@@ -828,6 +839,7 @@ function askAIWithPrompt(p){{
 <style>
 /* ── Reset & base ── */
 *{{box-sizing:border-box;margin:0;padding:0}}
+body.theme-light{{--bg:#f0f4f8;--bg2:#ffffff;--bg3:#e8edf4;--border:#d1d9e6;--border2:#b8c4d4;--text:#1e293b;--muted:#475569;--dim:#64748b;--accent:#4f46e5;--accent-light:#4f46e5}}
 :root{{--bg:#0a0d14;--bg2:#0d1117;--bg3:#111827;--border:#1e2942;--border2:#2d3f5e;--text:#e2e8f0;--muted:#64748b;--dim:#475569;--accent:#6366f1;--accent-light:#a5b4fc;--red:#ef4444;--orange:#f59e0b;--green:#22c55e}}
 body{{font-family:-apple-system,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;min-height:100vh;font-variant-numeric:tabular-nums}}
 h2{{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--muted);margin-bottom:14px;font-weight:700}}
@@ -1081,6 +1093,7 @@ tr:last-child td{{border-bottom:none}}
   <div class="nav-item"        onclick="showScreen('infra')"       id="nav-infra">Infrastructure</div>
   <div class="nav-item" onclick="showScreen('workbench')" id="nav-workbench" style="display:none">🔍 Workbench</div>
   <div class="topbar-right">
+    <button id="theme-toggle" onclick="toggleTheme()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:5px 10px;border-radius:6px;cursor:pointer;font-size:13px" title="Mode sombre/clair">🌙</button>
     {ir_btn}
     {report_btn}
     <div class="threat-badge" style="background:{threat_bg};color:{threat_color};border-color:{threat_color}">
@@ -1138,13 +1151,13 @@ tr:last-child td{{border-bottom:none}}
     <!-- Stat cards 2×3 -->
     <div class="grid g3">
       <div class="card">
-        <div class="stat-big" style="color:{cpu_color}">{metrics['cpu']:.0f}%</div>
+        <div class="stat-big" style="color:{cpu_color}" id="live-cpu">{metrics['cpu']:.0f}%</div>
         <div class="stat-label">CPU</div>
         <div class="stat-sub">Load {metrics['load1']}</div>
         <canvas class="sparkline" id="sp-cpu"></canvas>
       </div>
       <div class="card">
-        <div class="stat-big" style="color:{ram_color}">{metrics['ram']:.0f}%</div>
+        <div class="stat-big" style="color:{ram_color}" id="live-ram">{metrics['ram']:.0f}%</div>
         <div class="stat-label">RAM</div>
         <div class="stat-sub">{metrics['ram_used']}GB / {metrics['ram_total']}GB</div>
         <canvas class="sparkline" id="sp-ram"></canvas>
@@ -1156,7 +1169,7 @@ tr:last-child td{{border-bottom:none}}
         <canvas class="sparkline" id="sp-disk"></canvas>
       </div>
       <div class="card">
-        <div class="stat-big" style="color:#ef4444">{ban_count}</div>
+        <div class="stat-big" style="color:#ef4444" id="live-bans">{ban_count}</div>
         <div class="stat-label">IPs bannies</div>
         <div class="stat-sub">fail2ban actif</div>
       </div>
@@ -1316,6 +1329,13 @@ tr:last-child td{{border-bottom:none}}
 
 <!-- ═══════════ ÉCRAN 4 : TIMELINE ═══════════ -->
 <div class="screen" id="screen-timeline">
+  <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px 18px;margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h3 style="margin:0;font-size:13px;color:var(--muted)">📌 Annotations opérateur</h3>
+      <button onclick="addAnnotation()" class="btn-primary" style="font-size:11px;padding:4px 12px">+ Ajouter</button>
+    </div>
+    <div id="ann-list" style="max-height:120px;overflow-y:auto"></div>
+  </div>
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
       <h2 style="margin:0">Timeline des événements — 24 dernières heures</h2>
@@ -1795,6 +1815,58 @@ function wbAnalyze(){{
 
 // ── Actions API ──
 {actions_js}
+
+// ── Annotations ──
+const _annotations={annotations_js};
+function renderAnnotations(){{
+  const el=document.getElementById('ann-list');
+  if(!el)return;
+  if(!_annotations.length){{el.innerHTML='<div style="color:var(--muted);font-size:12px">Aucune annotation.</div>';return;}}
+  el.innerHTML=_annotations.map(a=>`<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><span style="color:var(--accent)">${{a.ts}}</span> — ${{a.note}} <span style="color:var(--dim)">(par ${{a.author||'SOC'}})</span></div>`).join('');
+}}
+function addAnnotation(){{
+  showPromptModal("Ajouter une annotation","Texte de l'annotation...",function(txt){{
+    if(!txt)return;
+    const key=sessionStorage.getItem('soc_key')||'';
+    fetch('/action/annotation/add',{{method:'POST',headers:{{'Content-Type':'application/json','X-SOC-Key':key}},body:JSON.stringify({{note:txt,author:'David'}})
+    }}).then(r=>r.json()).then(d=>{{if(d.ok)location.reload();}}).catch(()=>{{}});
+  }});
+}}
+renderAnnotations();
+
+// ── SSE live metrics ──
+(function(){{
+  if(!window.EventSource)return;
+  const key=sessionStorage.getItem('soc_key')||'';
+  const src=new EventSource('/action/stream?key='+encodeURIComponent(key));
+  src.onmessage=function(e){{
+    try{{
+      const d=JSON.parse(e.data);
+      const cpuEl=document.getElementById('live-cpu');
+      const ramEl=document.getElementById('live-ram');
+      const banEl=document.getElementById('live-bans');
+      if(cpuEl)cpuEl.textContent=d.cpu+'%';
+      if(ramEl)ramEl.textContent=d.ram+'%';
+      if(banEl)banEl.textContent=d.bans;
+    }}catch(err){{}}
+  }};
+  src.onerror=function(){{ src.close(); }};
+}})();
+
+// ── Theme toggle ──
+function toggleTheme(){{
+  const b=document.body;
+  const light=b.classList.toggle('theme-light');
+  localStorage.setItem('soc_theme',light?'light':'dark');
+  document.getElementById('theme-toggle').textContent=light?'☀️':'🌙';
+}}
+(function(){{
+  if(localStorage.getItem('soc_theme')==='light'){{
+    document.body.classList.add('theme-light');
+    const btn=document.getElementById('theme-toggle');
+    if(btn)btn.textContent='☀️';
+  }}
+}})();
 </script>
 </body></html>"""
     # Générer manifest.json PWA
