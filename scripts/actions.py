@@ -242,6 +242,161 @@ def whitelist_remove():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 # ─────────────────────────────────────────
+# Logs
+# ─────────────────────────────────────────
+
+LOG_FILE = "/home/ubuntu/secops/detector.log"
+
+@app.route("/logs")
+@require_key
+def get_logs():
+    """
+    Dernières lignes du log detector
+    ---
+    tags: [SOC]
+    parameters:
+      - name: n
+        in: query
+        type: integer
+        default: 30
+    responses:
+      200:
+        description: Lignes de log
+    """
+    n = min(int(request.args.get("n", 30)), 200)
+    lines = []
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE) as f:
+            lines = f.readlines()[-n:]
+    return jsonify({"lines": [l.rstrip() for l in lines]})
+
+# ─────────────────────────────────────────
+# Config SOC
+# ─────────────────────────────────────────
+
+SOC_CONFIG_FILE = "/home/ubuntu/secops/soc_config.json"
+SOC_CONFIG_DEFAULTS = {
+    "ban_threshold": 80,
+    "warn_disk": 75,
+    "crit_disk": 88,
+    "warn_ram": 75,
+    "crit_ram": 90,
+    "sse_interval": 30,
+    "oncall": False,
+    "oncall_name": "David"
+}
+
+def load_soc_config():
+    if not os.path.exists(SOC_CONFIG_FILE):
+        with open(SOC_CONFIG_FILE, "w") as f:
+            json.dump(SOC_CONFIG_DEFAULTS, f, indent=2)
+        return dict(SOC_CONFIG_DEFAULTS)
+    try:
+        with open(SOC_CONFIG_FILE) as f:
+            cfg = json.load(f)
+        # Merge avec defaults pour les clés manquantes
+        for k, v in SOC_CONFIG_DEFAULTS.items():
+            cfg.setdefault(k, v)
+        return cfg
+    except Exception:
+        return dict(SOC_CONFIG_DEFAULTS)
+
+@app.route("/config", methods=["GET"])
+def get_config():
+    """
+    Lire la configuration SOC
+    ---
+    tags: [SOC]
+    responses:
+      200:
+        description: Configuration courante
+    """
+    # GET config est accessible sans clé (données non sensibles)
+    return jsonify(load_soc_config())
+
+@app.route("/config", methods=["POST"])
+@require_key
+def set_config():
+    """
+    Mettre à jour la configuration SOC
+    ---
+    tags: [SOC]
+    parameters:
+      - in: body
+        schema:
+          type: object
+    responses:
+      200:
+        description: Config mise à jour
+    """
+    data = request.get_json(force=True) or {}
+    cfg = load_soc_config()
+    # Valider et mettre à jour uniquement les clés connues
+    allowed_int = ["ban_threshold", "warn_disk", "crit_disk", "warn_ram", "crit_ram", "sse_interval"]
+    allowed_bool = ["oncall"]
+    allowed_str = ["oncall_name"]
+    for k in allowed_int:
+        if k in data:
+            try:
+                val = int(data[k])
+                if 0 <= val <= 100:
+                    cfg[k] = val
+            except (ValueError, TypeError):
+                pass
+    for k in allowed_bool:
+        if k in data:
+            cfg[k] = bool(data[k])
+    for k in allowed_str:
+        if k in data:
+            cfg[k] = str(data[k])[:50]
+    try:
+        with open(SOC_CONFIG_FILE, "w") as f:
+            json.dump(cfg, f, indent=2)
+        return jsonify({"ok": True, "config": cfg})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+# ─────────────────────────────────────────
+# Annotations
+# ─────────────────────────────────────────
+
+ANNOTATIONS_FILE = "/home/ubuntu/secops/annotations.json"
+
+@app.route("/annotation/add", methods=["POST"])
+@require_key
+def add_annotation():
+    """
+    Ajouter une annotation SOC
+    ---
+    tags: [SOC]
+    parameters:
+      - in: body
+        schema:
+          type: object
+    responses:
+      200:
+        description: Annotation ajoutée
+    """
+    data = request.get_json(force=True) or {}
+    note = str(data.get("note", ""))[:200]
+    author = str(data.get("author", "SOC"))[:30]
+    if not note:
+        return jsonify({"ok": False, "error": "note vide"}), 400
+    ann = []
+    if os.path.exists(ANNOTATIONS_FILE):
+        try:
+            with open(ANNOTATIONS_FILE) as f:
+                ann = json.load(f)
+        except Exception:
+            ann = []
+    from datetime import datetime
+    ann.append({"ts": datetime.now().strftime("%Y-%m-%d %H:%M"), "note": note, "author": author})
+    ann = ann[-50:]  # garder 50 max
+    with open(ANNOTATIONS_FILE, "w") as f:
+        json.dump(ann, f, indent=2)
+    return jsonify({"ok": True})
+
+# ─────────────────────────────────────────
 # SSE — métriques live
 # ─────────────────────────────────────────
 

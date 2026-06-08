@@ -993,6 +993,45 @@ tr:last-child td{{border-bottom:none}}
   .topbar-brand span{{display:none}}
   .threat-badge{{font-size:10px;padding:4px 8px}}
 }}
+/* ── Login overlay ── */
+.login-overlay{{display:none;position:fixed;inset:0;background:var(--bg);z-index:9000;flex-direction:column;align-items:center;justify-content:center}}
+.login-overlay.open{{display:flex}}
+.login-box{{background:var(--bg2);border:1px solid var(--border2);border-radius:20px;padding:40px 48px;width:100%;max-width:380px;text-align:center;box-shadow:0 32px 80px rgba(0,0,0,.8)}}
+.login-logo{{font-size:32px;margin-bottom:8px}}
+.login-title{{font-size:20px;font-weight:800;color:var(--text);margin-bottom:4px}}
+.login-sub{{font-size:12px;color:var(--muted);margin-bottom:28px}}
+.login-input{{width:100%;background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:12px 16px;border-radius:10px;font-size:14px;outline:none;margin-bottom:16px;transition:border-color .18s;box-sizing:border-box}}
+.login-input:focus{{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.15)}}
+.login-btn{{width:100%;background:var(--accent);border:none;color:#fff;padding:12px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s}}
+.login-btn:hover{{background:#4f46e5}}
+.login-error{{font-size:12px;color:var(--red);margin-top:10px;min-height:18px}}
+@keyframes loginShake{{0%,100%{{transform:translateX(0)}}25%{{transform:translateX(-8px)}}75%{{transform:translateX(8px)}}}}
+.login-box.shake{{animation:loginShake .3s ease}}
+/* ── Settings panel ── */
+.settings-panel{{position:fixed;top:0;right:0;width:320px;height:100vh;background:var(--bg2);border-left:1px solid var(--border);z-index:7000;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column;overflow-y:auto;box-shadow:-8px 0 32px rgba(0,0,0,.5)}}
+.settings-panel.open{{transform:translateX(0)}}
+.settings-overlay{{display:none;position:fixed;inset:0;z-index:6999;background:rgba(0,0,0,.4)}}
+.settings-overlay.open{{display:block}}
+.settings-header{{padding:20px 20px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}}
+.settings-title{{font-size:15px;font-weight:700;color:var(--text)}}
+.settings-section{{padding:16px 20px;border-bottom:1px solid var(--border)}}
+.settings-section-title{{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px}}
+.settings-row{{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:10px}}
+.settings-label{{font-size:13px;color:var(--text)}}
+.settings-sub{{font-size:11px;color:var(--muted)}}
+.settings-input{{background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:6px 10px;border-radius:7px;font-size:13px;width:70px;outline:none;text-align:center}}
+.settings-input:focus{{border-color:var(--accent)}}
+.toggle{{position:relative;width:40px;height:22px;flex-shrink:0}}
+.toggle input{{opacity:0;width:0;height:0}}
+.toggle-slider{{position:absolute;inset:0;background:#334155;border-radius:22px;cursor:pointer;transition:background .2s}}
+.toggle-slider:before{{content:'';position:absolute;width:16px;height:16px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:transform .2s}}
+.toggle input:checked+.toggle-slider{{background:var(--accent)}}
+.toggle input:checked+.toggle-slider:before{{transform:translateX(18px)}}
+.settings-save-btn{{margin:16px 20px;background:var(--accent);border:none;color:#fff;padding:10px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;width:calc(100% - 40px);transition:background .15s}}
+.settings-save-btn:hover{{background:#4f46e5}}
+.oncall-badge{{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600}}
+.oncall-on{{background:#14532d;color:#86efac}}
+.oncall-off{{background:#1e2942;color:var(--muted)}}
 /* ── Modal ── */
 .modal-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:3000;align-items:center;justify-content:center;backdrop-filter:blur(4px)}}
 .modal-overlay.open{{display:flex}}
@@ -1049,6 +1088,77 @@ tr:last-child td{{border-bottom:none}}
 </head><body>
 <div id="toast"></div>
 
+<!-- ═══ LOGIN ═══ -->
+<div class="login-overlay" id="login-overlay">
+  <div class="login-box" id="login-box">
+    <div class="login-logo">🛡️</div>
+    <div class="login-title">ViaDigiTech SOC</div>
+    <div class="login-sub">Authentification requise</div>
+    <input class="login-input" id="login-key" type="password" placeholder="Clé API SOC..." autocomplete="off">
+    <button class="login-btn" onclick="doLogin()">Connexion</button>
+    <div class="login-error" id="login-error"></div>
+  </div>
+</div>
+
+<!-- ═══ SETTINGS ═══ -->
+<div class="settings-overlay" id="settings-overlay" onclick="closeSettings()"></div>
+<div class="settings-panel" id="settings-panel">
+  <div class="settings-header">
+    <span class="settings-title">⚙️ Paramètres</span>
+    <button onclick="closeSettings()" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;line-height:1">×</button>
+  </div>
+  <div class="settings-section">
+    <div class="settings-section-title">Opérateur</div>
+    <div class="settings-row">
+      <div><div class="settings-label">Astreinte</div><div class="settings-sub">Statut affiché dans la topbar</div></div>
+      <label class="toggle"><input type="checkbox" id="cfg-oncall" onchange="saveSettingsLive()"><span class="toggle-slider"></span></label>
+    </div>
+    <div class="settings-row">
+      <div class="settings-label">Clé API</div>
+      <button onclick="resetApiKey()" style="background:#1e2942;border:1px solid var(--border2);color:var(--muted);padding:5px 10px;border-radius:7px;font-size:11px;cursor:pointer">🔄 Reset</button>
+    </div>
+  </div>
+  <div class="settings-section">
+    <div class="settings-section-title">Interface</div>
+    <div class="settings-row">
+      <div class="settings-label">Mode sombre</div>
+      <label class="toggle"><input type="checkbox" id="cfg-theme" onchange="applyThemeFromSettings()"><span class="toggle-slider"></span></label>
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-label">Intervalle SSE</div><div class="settings-sub">Secondes entre updates live</div></div>
+      <input class="settings-input" id="cfg-sse" type="number" min="10" max="300" value="30">
+    </div>
+    <div class="settings-row">
+      <div class="settings-label">Notifications navigateur</div>
+      <label class="toggle"><input type="checkbox" id="cfg-notif"><span class="toggle-slider"></span></label>
+    </div>
+  </div>
+  <div class="settings-section">
+    <div class="settings-section-title">Administration — Seuils</div>
+    <div class="settings-row">
+      <div><div class="settings-label">Ban auto AbuseIPDB</div><div class="settings-sub">Score min pour ban automatique</div></div>
+      <input class="settings-input" id="cfg-ban-threshold" type="number" min="50" max="100" value="80">
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-label">Alerte disque warn</div></div>
+      <input class="settings-input" id="cfg-warn-disk" type="number" min="50" max="95" value="75">
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-label">Alerte disque crit</div></div>
+      <input class="settings-input" id="cfg-crit-disk" type="number" min="60" max="99" value="88">
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-label">Alerte RAM warn</div></div>
+      <input class="settings-input" id="cfg-warn-ram" type="number" min="50" max="95" value="75">
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-label">Alerte RAM crit</div></div>
+      <input class="settings-input" id="cfg-crit-ram" type="number" min="60" max="99" value="90">
+    </div>
+  </div>
+  <button class="settings-save-btn" onclick="saveSettings()">💾 Sauvegarder</button>
+</div>
+
 <!-- ═══ MODAL ═══ -->
 <div class="modal-overlay" id="modal-overlay" onclick="handleOverlayClick(event)">
   <div class="modal-box">
@@ -1093,6 +1203,14 @@ tr:last-child td{{border-bottom:none}}
   <div class="nav-item"        onclick="showScreen('infra')"       id="nav-infra">Infrastructure</div>
   <div class="nav-item" onclick="showScreen('workbench')" id="nav-workbench" style="display:none">🔍 Workbench</div>
   <div class="topbar-right">
+    <span class="topbar-hostname" id="topbar-hostname">{hostname}</span>
+    <div id="status-bar" style="display:flex;align-items:center;gap:8px;padding-left:12px">
+      <span id="st-f2b" title="Fail2Ban" style="font-size:10px;display:flex;align-items:center;gap:3px;color:var(--muted)"><span style="width:7px;height:7px;border-radius:50%;background:#334155;display:inline-block" id="dot-f2b"></span>f2b</span>
+      <span id="st-api" title="API Flask" style="font-size:10px;display:flex;align-items:center;gap:3px;color:var(--muted)"><span style="width:7px;height:7px;border-radius:50%;background:#334155;display:inline-block" id="dot-api"></span>api</span>
+      <span id="st-sse" title="SSE live" style="font-size:10px;display:flex;align-items:center;gap:3px;color:var(--muted)"><span style="width:7px;height:7px;border-radius:50%;background:#334155;display:inline-block" id="dot-sse"></span>sse</span>
+    </div>
+    <span id="oncall-badge" style="display:none" class="oncall-badge oncall-on">ON CALL</span>
+    <button onclick="openSettings()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:5px 10px;border-radius:6px;cursor:pointer;font-size:13px" title="Paramètres">⚙️</button>
     <button id="theme-toggle" onclick="toggleTheme()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:5px 10px;border-radius:6px;cursor:pointer;font-size:13px" title="Mode sombre/clair">🌙</button>
     {ir_btn}
     {report_btn}
@@ -1101,7 +1219,6 @@ tr:last-child td{{border-bottom:none}}
     </div>
     {svc_badge}
     <span class="age-indicator" id="age-indicator" title="Données générées à {now.strftime('%H:%M:%S')}">⟳ à l'instant</span>
-    <span class="topbar-hostname">{hostname} · {now.strftime('%d/%m %H:%M')}</span>
   </div>
 </nav>
 
@@ -1261,6 +1378,7 @@ tr:last-child td{{border-bottom:none}}
         <h2 style="margin:0">Top IPs attaquantes 24h</h2>
         <button onclick="exportTable('ip-table','top_ips')" class="btn-primary" style="font-size:11px;padding:4px 12px">⬇ Export CSV</button>
       </div>
+      <input id="filter-ip" type="text" placeholder="Filtrer par IP, pays, score..." oninput="filterTable('ip-table','filter-ip')" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 12px;border-radius:8px;font-size:12px;outline:none;margin-bottom:8px">
       {"<div class='empty-state'><svg viewBox='0 0 24 24'><path d='M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z'/></svg><p>Aucune activité SSH suspecte</p></div>" if not top_ip_rows else f"<div class='table-wrap' style='max-height:360px;overflow-y:auto'><table id='ip-table'><thead><tr><th>IP</th><th style='text-align:right'>Tentatives</th></tr></thead><tbody>{top_ip_rows}</tbody></table></div>"}
       {f'<div style="margin-top:14px;padding-top:12px;border-top:1px solid #1e2942"><h2>Connexions légitimes 24h</h2><div class="table-wrap"><table><thead><tr><th></th><th>IP</th><th>Utilisateur</th><th>Heure</th></tr></thead><tbody>{accepted_html}</tbody></table></div></div>' if accepted_html else ""}
     </div>
@@ -1269,6 +1387,7 @@ tr:last-child td{{border-bottom:none}}
         <h2 style="margin:0">Journal d'audit</h2>
         <button onclick="exportTable('audit-table','audit_log')" class="btn-primary" style="font-size:11px;padding:4px 12px">⬇ Export CSV</button>
       </div>
+      <input id="filter-audit" type="text" placeholder="Filtrer audit log..." oninput="filterTable('audit-table','filter-audit')" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 12px;border-radius:8px;font-size:12px;outline:none;margin-bottom:8px">
       {"<div class='empty-state'><svg viewBox='0 0 24 24'><path d='M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'/></svg><p>Aucune action enregistrée</p></div>" if not audit_html else f"<div class='table-wrap' style='max-height:360px;overflow-y:auto'><table id='audit-table'><thead><tr><th>Heure</th><th>IP</th><th>Action</th><th style='text-align:right'>Score</th></tr></thead><tbody>{audit_html}</tbody></table></div>"}
     </div>
   </div>
@@ -1368,6 +1487,13 @@ tr:last-child td{{border-bottom:none}}
       </div>
     </div>
   </div>
+  <div class="card" style="margin-top:16px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <h2 style="margin:0">Journal detector (live)</h2>
+      <button onclick="refreshLogs()" class="btn-primary" style="font-size:11px;padding:4px 12px">⟳ Refresh</button>
+    </div>
+    <div id="live-logs" style="font-family:monospace;font-size:11px;color:#94a3b8;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;max-height:240px;overflow-y:auto;white-space:pre-wrap;word-break:break-all">Chargement...</div>
+  </div>
 <!-- ═══════════ ÉCRAN 6 : WORKBENCH IP ═══════════ -->
 <div class="screen" id="screen-workbench">
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
@@ -1446,6 +1572,121 @@ tr:last-child td{{border-bottom:none}}
 </div>
 
 <script>
+// ── Login ──
+async function doLogin(){{
+  const key=document.getElementById('login-key').value.trim();
+  if(!key)return;
+  try{{
+    const r=await fetch('/action/status',{{headers:{{'X-SOC-Key':key}}}});
+    if(r.ok){{
+      sessionStorage.setItem('soc_api_key',key);
+      document.getElementById('login-overlay').classList.remove('open');
+    }}else{{
+      const box=document.getElementById('login-box');
+      document.getElementById('login-error').textContent="Clé invalide — réessayez";
+      box.classList.remove('shake');void box.offsetWidth;box.classList.add('shake');
+    }}
+  }}catch(e){{
+    document.getElementById('login-error').textContent="Erreur réseau";
+  }}
+}}
+document.addEventListener('DOMContentLoaded',function(){{
+  const k=sessionStorage.getItem('soc_api_key');
+  if(!k){{
+    document.getElementById('login-overlay').classList.add('open');
+    setTimeout(()=>document.getElementById('login-key')?.focus(),100);
+  }}
+}});
+document.getElementById('login-key')?.addEventListener('keydown',e=>{{if(e.key==='Enter')doLogin();}});
+
+// ── Settings panel ──
+function openSettings(){{
+  loadSettingsFromServer();
+  document.getElementById('settings-panel').classList.add('open');
+  document.getElementById('settings-overlay').classList.add('open');
+}}
+function closeSettings(){{
+  document.getElementById('settings-panel').classList.remove('open');
+  document.getElementById('settings-overlay').classList.remove('open');
+}}
+async function loadSettingsFromServer(){{
+  try{{
+    const r=await fetch('/action/config');
+    const cfg=await r.json();
+    const el=id=>document.getElementById(id);
+    if(el('cfg-oncall'))el('cfg-oncall').checked=!!cfg.oncall;
+    if(el('cfg-sse'))el('cfg-sse').value=cfg.sse_interval||30;
+    if(el('cfg-ban-threshold'))el('cfg-ban-threshold').value=cfg.ban_threshold||80;
+    if(el('cfg-warn-disk'))el('cfg-warn-disk').value=cfg.warn_disk||75;
+    if(el('cfg-crit-disk'))el('cfg-crit-disk').value=cfg.crit_disk||88;
+    if(el('cfg-warn-ram'))el('cfg-warn-ram').value=cfg.warn_ram||75;
+    if(el('cfg-crit-ram'))el('cfg-crit-ram').value=cfg.crit_ram||90;
+    if(el('cfg-theme'))el('cfg-theme').checked=document.body.classList.contains('theme-light');
+    updateOncallBadge(!!cfg.oncall);
+  }}catch(e){{}}
+}}
+async function saveSettings(){{
+  const key=sessionStorage.getItem('soc_api_key')||'';
+  const el=id=>document.getElementById(id);
+  const payload={{
+    oncall:el('cfg-oncall')?.checked||false,
+    sse_interval:parseInt(el('cfg-sse')?.value||30),
+    ban_threshold:parseInt(el('cfg-ban-threshold')?.value||80),
+    warn_disk:parseInt(el('cfg-warn-disk')?.value||75),
+    crit_disk:parseInt(el('cfg-crit-disk')?.value||88),
+    warn_ram:parseInt(el('cfg-warn-ram')?.value||75),
+    crit_ram:parseInt(el('cfg-crit-ram')?.value||90)
+  }};
+  try{{
+    const r=await fetch('/action/config',{{method:'POST',headers:{{'Content-Type':'application/json','X-SOC-Key':key}},body:JSON.stringify(payload)}});
+    const d=await r.json();
+    if(d.ok){{showToast("Paramètres sauvegardés",true);updateOncallBadge(payload.oncall);closeSettings();}}
+    else showToast("Erreur: "+d.error,false);
+  }}catch(e){{showToast("Erreur réseau",false);}}
+}}
+function saveSettingsLive(){{
+  const oncall=document.getElementById('cfg-oncall')?.checked||false;
+  updateOncallBadge(oncall);
+}}
+function updateOncallBadge(on){{
+  const b=document.getElementById('oncall-badge');
+  if(!b)return;
+  b.style.display=on?'inline-block':'none';
+  b.className='oncall-badge '+(on?'oncall-on':'oncall-off');
+  b.textContent=on?'ON CALL':'OFF';
+}}
+function applyThemeFromSettings(){{
+  const light=document.getElementById('cfg-theme')?.checked;
+  document.body.classList.toggle('theme-light',light);
+  localStorage.setItem('soc_theme',light?'light':'dark');
+  const btn=document.getElementById('theme-toggle');
+  if(btn)btn.textContent=light?'☀️':'🌙';
+}}
+function resetApiKey(){{
+  sessionStorage.removeItem('soc_api_key');
+  closeSettings();
+  document.getElementById('login-overlay').classList.add('open');
+  setTimeout(()=>document.getElementById('login-key')?.focus(),100);
+}}
+(function(){{loadSettingsFromServer();}})();
+
+// ── Status bar ──
+function setDot(id,ok){{
+  const d=document.getElementById(id);
+  if(d)d.style.background=ok?'#22c55e':'#ef4444';
+}}
+async function refreshStatusBar(){{
+  const key=sessionStorage.getItem('soc_api_key')||'';
+  try{{
+    const r=await fetch('/action/status',{{headers:{{'X-SOC-Key':key}},signal:AbortSignal.timeout(4000)}});
+    const d=await r.json();
+    setDot('dot-api',r.ok);
+    setDot('dot-f2b',!!(d.fail2ban_active||d.banned_count>=0));
+  }}catch(e){{setDot('dot-api',false);setDot('dot-f2b',false);}}
+}}
+refreshStatusBar();
+setInterval(refreshStatusBar,60000);
+
 // ── Navigation ──
 function showScreen(id){{
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
@@ -1588,6 +1829,16 @@ function filterSecurity(){{
     r.style.display=(!q||ip.includes(q))?'':'none';
   }});
   document.getElementById('filter-count').textContent=q||_filter!=='all'?shown+' résultat(s)':'';
+}}
+
+// ── Filtre générique tableau ──
+function filterTable(tableId,inputId){{
+  const q=document.getElementById(inputId)?.value.toLowerCase()||'';
+  const rows=document.querySelectorAll('#'+tableId+' tr');
+  rows.forEach((r,i)=>{{
+    if(i===0)return;
+    r.style.display=q===''||r.textContent.toLowerCase().includes(q)?'':'none';
+  }});
 }}
 
 // ── Graphique bans 7j ECharts ──
@@ -1774,6 +2025,19 @@ document.addEventListener('keydown',e=>{{
 }});
 document.getElementById('cmdk-input')?.addEventListener('input',e=>renderCmdK(e.target.value));
 
+// ── Raccourcis clavier 1-5 ──
+document.addEventListener('keydown',function(e){{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
+  if(document.getElementById('login-overlay')?.classList.contains('open'))return;
+  if(e.key==='1')showScreen('overview');
+  else if(e.key==='2')showScreen('security');
+  else if(e.key==='3')showScreen('performance');
+  else if(e.key==='4')showScreen('timeline');
+  else if(e.key==='5')showScreen('infra');
+  else if(e.key==='b'||e.key==='B'){{e.preventDefault();const ip=prompt('Bannir IP:');if(ip)banIP(ip);}}
+  else if(e.key==='?')openCmdK();
+}});
+
 // ── Mode IR ──
 function openIR(){{
   const ol=document.getElementById('ir-overlay');
@@ -1803,6 +2067,25 @@ function closeIR(){{
   document.getElementById('ir-overlay').classList.remove('open');
   if(window._irTimer)clearInterval(window._irTimer);
 }}
+
+// ── Logs live infra ──
+async function refreshLogs(){{
+  const key=sessionStorage.getItem('soc_api_key')||'';
+  const el=document.getElementById('live-logs');
+  if(!el)return;
+  try{{
+    const r=await fetch('/action/logs?n=40',{{headers:{{'X-SOC-Key':key}}}});
+    const d=await r.json();
+    el.textContent=(d.lines||[]).join('\\n')||'Aucun log disponible';
+    el.scrollTop=el.scrollHeight;
+  }}catch(e){{el.textContent='Erreur: '+e.message;}}
+}}
+document.addEventListener('DOMContentLoaded',function(){{
+  if(typeof showScreen==='function'){{
+    const _orig=showScreen;
+    window.showScreen=function(s){{_orig(s);if(s==='infra')refreshLogs();}};
+  }}
+}});
 
 // ── Workbench IP ──
 let _wbIp='';
@@ -1882,9 +2165,10 @@ renderAnnotations();
       if(cpuEl)cpuEl.textContent=d.cpu+'%';
       if(ramEl)ramEl.textContent=d.ram+'%';
       if(banEl)banEl.textContent=d.bans;
+      setDot('dot-sse',true);
     }}catch(err){{}}
   }};
-  src.onerror=function(){{ src.close(); }};
+  src.onerror=function(){{setDot('dot-sse',false);src.close();}};
 }})();
 
 // ── Theme toggle ──
