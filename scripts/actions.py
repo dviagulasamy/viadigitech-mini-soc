@@ -35,9 +35,11 @@ except ImportError:
     _swagger_ok = False
 
 if _limiter_ok:
-    limiter = Limiter(app, key_func=get_remote_address, default_limits=["60 per minute"])
+    limiter = Limiter(key_func=get_remote_address, default_limits=["60 per minute"])
+    limiter.init_app(app)
 
-ACTIONS_KEY  = os.environ.get("SOC_ACTIONS_KEY", "")
+ACTIONS_KEY   = os.environ.get("SOC_ACTIONS_KEY", "")
+DASHBOARD_PWD = os.environ.get("SOC_DASHBOARD_PWD", "")  # Mot de passe mire de connexion (distinct de la clé API)
 OLLAMA_URL   = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = "qwen2.5:3b"
 IP_RE        = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
@@ -67,7 +69,19 @@ def valid_ip(ip):
 # Endpoints
 # ─────────────────────────────────────────
 
+@app.route("/auth", methods=["POST"])
+def auth():
+    """Valide le mot de passe de la mire de connexion (SOC_DASHBOARD_PWD)."""
+    data = request.get_json(force=True) or {}
+    pwd = str(data.get("password", ""))
+    if not DASHBOARD_PWD:
+        return jsonify({"ok": False, "error": "SOC_DASHBOARD_PWD non défini"}), 403
+    if pwd == DASHBOARD_PWD:
+        return jsonify({"ok": True})
+    return jsonify({"ok": False, "error": "Mot de passe invalide"}), 403
+
 @app.route("/status")
+@require_key
 def status():
     """
     Statut du SOC

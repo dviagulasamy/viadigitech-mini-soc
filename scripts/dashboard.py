@@ -1574,19 +1574,18 @@ tr:last-child td{{border-bottom:none}}
 <script>
 // ── Login ──
 async function doLogin(){{
-  const key=document.getElementById('login-key').value.trim();
-  if(!key)return;
+  const pwd=document.getElementById('login-key').value.trim();
+  if(!pwd)return;
   document.getElementById('login-error').textContent="";
   try{{
-    const r=await fetch('/action/ban',{{method:'POST',headers:{{'Content-Type':'application/json','X-SOC-Key':key}},body:JSON.stringify({{ip:'0.0.0.0',_check:true}})}});
-    // 400 = clé OK mais IP invalide = bonne clé ; 401/403 = clé invalide
-    if(r.status===400||r.ok){{
-      sessionStorage.setItem('soc_api_key',key);
+    const r=await fetch('/action/auth',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{password:pwd}}),signal:AbortSignal.timeout(5000)}});
+    const d=await r.json().catch(()=>({{}}));
+    if(r.ok&&d.ok){{
+      sessionStorage.setItem('soc_auth','1');
       document.getElementById('login-overlay').classList.remove('open');
-      setTimeout(()=>document.getElementById('login-key').value='',100);
     }}else{{
       const box=document.getElementById('login-box');
-      document.getElementById('login-error').textContent="Clé invalide — réessayez";
+      document.getElementById('login-error').textContent="Mot de passe invalide";
       box.classList.remove('shake');void box.offsetWidth;box.classList.add('shake');
     }}
   }}catch(e){{
@@ -1595,8 +1594,8 @@ async function doLogin(){{
 }}
 // Exécution directe (script en fin de body, DOM déjà prêt)
 (function(){{
-  const k=sessionStorage.getItem('soc_api_key');
-  if(k){{
+  const auth=sessionStorage.getItem('soc_auth');
+  if(auth==='1'){{
     document.getElementById('login-overlay').classList.remove('open');
   }}else{{
     setTimeout(()=>document.getElementById('login-key')?.focus(),150);
@@ -1668,6 +1667,7 @@ function applyThemeFromSettings(){{
   if(btn)btn.textContent=light?'☀️':'🌙';
 }}
 function resetApiKey(){{
+  sessionStorage.removeItem('soc_auth');
   sessionStorage.removeItem('soc_api_key');
   closeSettings();
   document.getElementById('login-overlay').classList.add('open');
