@@ -12,8 +12,16 @@ import threading
 import requests
 from flask import Flask, request, jsonify
 from functools import wraps
+try:
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+    _limiter_ok = True
+except ImportError:
+    _limiter_ok = False
 
 app = Flask(__name__)
+if _limiter_ok:
+    limiter = Limiter(app, key_func=get_remote_address, default_limits=["60 per minute"])
 
 ACTIONS_KEY  = os.environ.get("SOC_ACTIONS_KEY", "")
 OLLAMA_URL   = "http://localhost:11434/api/generate"

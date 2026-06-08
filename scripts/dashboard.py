@@ -14,6 +14,9 @@ from collections import Counter, defaultdict
 import re
 import psutil
 
+# ── PWA manifest path ──
+MANIFEST_PATH = "/var/www/html/viadigitech-reports/soc/manifest.json"
+
 OUTPUT_FILE  = "/var/www/html/viadigitech-reports/soc/index.html"
 AUDIT_LOG    = "/home/ubuntu/secops/audit_actions.csv"
 DETECTOR_LOG = "/home/ubuntu/secops/detector.log"
@@ -458,6 +461,14 @@ def build_html():
     ssh_total, ssh_fails, accepted = get_ssh_stats(24)
     bans_today = get_bans_today()
     audit_rows = get_audit_recent(20)
+
+    # ── KPIs SOC ──
+    ban_auto_count = sum(1 for r in audit_rows if "BAN_AUTO" in r[2])
+    ban_ollama_count = sum(1 for r in audit_rows if "BAN_OLLAMA" in r[2])
+    total_bans_recent = ban_auto_count + ban_ollama_count
+    coverage_rate = min(int(ban_count / max(ssh_total, 1) * 100), 100) if ssh_total > 0 else 0
+    recidivists = len([ip for ip, cnt in ssh_fails.items() if cnt > 20])
+
     det_log    = get_detector_log(20)
     containers = get_docker_containers()
     ai_summary = get_ai_summary()
@@ -536,7 +547,8 @@ def build_html():
         geo = geo_data.get(ip, {})
         loc = f"<span style='color:#475569;font-size:10px;margin-left:6px'>{geo.get('cc','')} {geo.get('city','')}</span>" if geo else ""
         btn = f"""<button onclick="banIP('{ip}')" class="btn-danger">Bannir</button>""" if ACTIONS_KEY else ""
-        top_ip_rows += f"<tr data-ip='{ip}'><td style='font-family:monospace;font-size:12px'>{is_banned} {ip}{loc}{btn}</td><td style='text-align:right;font-weight:700;color:#ef4444'>{count}</td></tr>"
+        ip_link = f"<span onclick=\"openWorkbench('{ip}')\" style=\"cursor:pointer;color:#a5b4fc;text-decoration:underline dotted\">{ip}</span>"
+        top_ip_rows += f"<tr data-ip='{ip}'><td style='font-family:monospace;font-size:12px'>{is_banned} {ip_link}{loc}{btn}</td><td style='text-align:right;font-weight:700;color:#ef4444'>{count}</td></tr>"
 
     # ── Connexions légitimes ──
     accepted_html = ""
@@ -708,6 +720,9 @@ def build_html():
     # ── Bouton rapport ──
     report_btn = "<button onclick='sendReport(this)' class='btn-primary' style='font-size:11px;padding:4px 12px'>📋 Rapport maintenant</button>" if ACTIONS_KEY else ""
 
+    # ── Bouton IR ──
+    ir_btn = f'<button onclick="openIR()" style="background:#450a0a;border:1px solid #dc2626;color:#fca5a5;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600">⚡ IR</button>'
+
     # ── Actions JS ──
     actions_js = ""
     if ACTIONS_KEY:
@@ -786,12 +801,27 @@ function askAI(){{
       document.getElementById('ai-response-text').innerHTML=r.response.replace(/\\n/g,'<br>');
     }}else if(r)showToast('Erreur IA : '+r.error,false);
   }});
+}}
+function askAIWithPrompt(p){{
+  if(!p)return;
+  showToast("Analyse en cours...",true,8000);
+  apiCall('/analyze',{{prompt:p}},null).then(r=>{{
+    if(r&&r.ok){{
+      showScreen('overview');
+      document.getElementById('ai-response-box').style.display='block';
+      document.getElementById('ai-response-text').innerHTML=r.response.replace(/\\n/g,'<br>');
+    }}
+  }});
 }}"""
 
     html = f"""<!DOCTYPE html>
 <html lang="fr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SOC — {hostname}</title>
+<link rel="manifest" href="/soc/manifest.json">
+<meta name="theme-color" content="#6366f1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -981,6 +1011,28 @@ tr:last-child td{{border-bottom:none}}
 .age-indicator{{font-size:11px;color:#475569;padding:0 8px;white-space:nowrap}}
 .age-indicator.fresh{{color:#22c55e}}
 .age-indicator.stale{{color:#f59e0b}}
+/* ── Recherche globale Ctrl+K ── */
+.cmdk-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:4000;align-items:flex-start;justify-content:center;padding-top:15vh;backdrop-filter:blur(4px)}}
+.cmdk-overlay.open{{display:flex}}
+.cmdk-box{{background:#111827;border:1px solid #2d3f5e;border-radius:14px;width:100%;max-width:560px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.9)}}
+.cmdk-input{{width:100%;background:transparent;border:none;outline:none;padding:18px 20px;font-size:16px;color:#e2e8f0;border-bottom:1px solid #1e2942}}
+.cmdk-input::placeholder{{color:#475569}}
+.cmdk-results{{max-height:320px;overflow-y:auto}}
+.cmdk-item{{padding:12px 20px;cursor:pointer;display:flex;align-items:center;gap:12px;font-size:13px;color:#94a3b8;transition:background .1s}}
+.cmdk-item:hover,.cmdk-item.selected{{background:#1e2942;color:#e2e8f0}}
+.cmdk-item-icon{{font-size:16px;width:24px;text-align:center}}
+.cmdk-item-label{{flex:1}}
+.cmdk-item-hint{{font-size:11px;color:#334155}}
+.cmdk-footer{{padding:8px 16px;font-size:11px;color:#334155;border-top:1px solid #1e2942;display:flex;gap:16px}}
+/* ── Mode IR ── */
+.ir-mode body{{background:#1a0000}}
+.ir-overlay{{display:none;position:fixed;inset:0;background:#0a0d14;z-index:5000;flex-direction:column;overflow-y:auto}}
+.ir-overlay.open{{display:flex}}
+.ir-header{{padding:16px 24px;background:#1a0000;border-bottom:2px solid #dc2626;display:flex;align-items:center;justify-content:space-between}}
+.ir-title{{font-size:18px;font-weight:800;color:#fca5a5;letter-spacing:1px}}
+.ir-score-big{{font-size:80px;font-weight:900;letter-spacing:-6px;line-height:1;text-align:center;margin:20px 0}}
+.ir-grid{{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px 24px;flex:1}}
+.ir-card{{background:#111827;border:1px solid #334155;border-radius:12px;padding:16px}}
 </style>
 </head><body>
 <div id="toast"></div>
@@ -1027,7 +1079,9 @@ tr:last-child td{{border-bottom:none}}
   <div class="nav-item"        onclick="showScreen('performance')" id="nav-performance">Performance</div>
   <div class="nav-item"        onclick="showScreen('timeline')"    id="nav-timeline">Timeline</div>
   <div class="nav-item"        onclick="showScreen('infra')"       id="nav-infra">Infrastructure</div>
+  <div class="nav-item" onclick="showScreen('workbench')" id="nav-workbench" style="display:none">🔍 Workbench</div>
   <div class="topbar-right">
+    {ir_btn}
     {report_btn}
     <div class="threat-badge" style="background:{threat_bg};color:{threat_color};border-color:{threat_color}">
       {threat}/100 — {threat_label}
@@ -1129,6 +1183,33 @@ tr:last-child td{{border-bottom:none}}
     </div>
   </div>
 
+  <!-- KPIs SOC -->
+  <div class="card" style="margin-bottom:14px">
+    <h2>KPIs SOC — 24h</h2>
+    <div class="grid g4">
+      <div style="text-align:center;padding:8px">
+        <div style="font-size:26px;font-weight:800;color:#22c55e">{coverage_rate}%</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px">Taux de couverture</div>
+        <div style="font-size:10px;color:#334155">bans / tentatives</div>
+      </div>
+      <div style="text-align:center;padding:8px">
+        <div style="font-size:26px;font-weight:800;color:#f59e0b">~7.5min</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px">MTTD moyen</div>
+        <div style="font-size:10px;color:#334155">détection → ban</div>
+      </div>
+      <div style="text-align:center;padding:8px">
+        <div style="font-size:26px;font-weight:800;color:#a78bfa">{ban_auto_count}</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px">Bans auto (AbuseIPDB)</div>
+        <div style="font-size:10px;color:#334155">sur 20 dernières actions</div>
+      </div>
+      <div style="text-align:center;padding:8px">
+        <div style="font-size:26px;font-weight:800;color:#ef4444">{recidivists}</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px">Récidivistes actifs</div>
+        <div style="font-size:10px;color:#334155">&gt; 20 tentatives / IP</div>
+      </div>
+    </div>
+  </div>
+
   <!-- IA -->
   <div style="margin-bottom:14px">{ai_html}</div>
 
@@ -1163,12 +1244,18 @@ tr:last-child td{{border-bottom:none}}
 
   <div class="grid g2" style="margin-bottom:14px">
     <div class="card">
-      <h2>Top IPs attaquantes 24h</h2>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h2 style="margin:0">Top IPs attaquantes 24h</h2>
+        <button onclick="exportTable('ip-table','top_ips')" class="btn-primary" style="font-size:11px;padding:4px 12px">⬇ Export CSV</button>
+      </div>
       {"<div class='empty-state'><svg viewBox='0 0 24 24'><path d='M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z'/></svg><p>Aucune activité SSH suspecte</p></div>" if not top_ip_rows else f"<div class='table-wrap' style='max-height:360px;overflow-y:auto'><table id='ip-table'><thead><tr><th>IP</th><th style='text-align:right'>Tentatives</th></tr></thead><tbody>{top_ip_rows}</tbody></table></div>"}
       {f'<div style="margin-top:14px;padding-top:12px;border-top:1px solid #1e2942"><h2>Connexions légitimes 24h</h2><div class="table-wrap"><table><thead><tr><th></th><th>IP</th><th>Utilisateur</th><th>Heure</th></tr></thead><tbody>{accepted_html}</tbody></table></div></div>' if accepted_html else ""}
     </div>
     <div class="card">
-      <h2>Journal d'audit</h2>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h2 style="margin:0">Journal d'audit</h2>
+        <button onclick="exportTable('audit-table','audit_log')" class="btn-primary" style="font-size:11px;padding:4px 12px">⬇ Export CSV</button>
+      </div>
       {"<div class='empty-state'><svg viewBox='0 0 24 24'><path d='M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'/></svg><p>Aucune action enregistrée</p></div>" if not audit_html else f"<div class='table-wrap' style='max-height:360px;overflow-y:auto'><table id='audit-table'><thead><tr><th>Heure</th><th>IP</th><th>Action</th><th style='text-align:right'>Score</th></tr></thead><tbody>{audit_html}</tbody></table></div>"}
     </div>
   </div>
@@ -1261,9 +1348,78 @@ tr:last-child td{{border-bottom:none}}
       </div>
     </div>
   </div>
+<!-- ═══════════ ÉCRAN 6 : WORKBENCH IP ═══════════ -->
+<div class="screen" id="screen-workbench">
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+    <button onclick="showScreen('security')" style="background:transparent;border:1px solid #334155;color:#94a3b8;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px">← Retour</button>
+    <h1 id="wb-ip-title" style="font-size:20px;font-weight:800;color:#a5b4fc;font-family:monospace"></h1>
+    <div id="wb-actions" style="display:flex;gap:8px;margin-left:auto"></div>
+  </div>
+  <div class="grid g3" style="margin-bottom:14px">
+    <div class="card"><h2>Score AbuseIPDB</h2><div id="wb-score" class="stat-big">—</div></div>
+    <div class="card"><h2>Tentatives 24h</h2><div id="wb-attempts" class="stat-big" style="color:#f59e0b">—</div></div>
+    <div class="card"><h2>Statut</h2><div id="wb-status" class="stat-big">—</div></div>
+  </div>
+  <div class="grid g2" style="margin-bottom:14px">
+    <div class="card">
+      <h2>Géolocalisation</h2>
+      <div id="wb-geo" style="font-size:13px;color:#94a3b8;line-height:2"></div>
+    </div>
+    <div class="card">
+      <h2>Historique des actions</h2>
+      <div class="table-wrap"><table id="wb-history-table"><thead><tr><th>Heure</th><th>Action</th><th>Score</th></tr></thead><tbody id="wb-history"></tbody></table></div>
+    </div>
+  </div>
+  <div class="card" style="margin-bottom:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <h2 style="margin:0">Analyse IA sur cette IP</h2>
+      <button id="wb-analyze-btn" onclick="wbAnalyze()" class="btn-primary">🤖 Analyser</button>
+    </div>
+    <div id="wb-ai-result" style="font-size:13px;color:#94a3b8;line-height:1.8;min-height:40px"></div>
+  </div>
 </div>
 
 </div><!-- /main -->
+
+<!-- ═══ CTRL+K SEARCH ═══ -->
+<div class="cmdk-overlay" id="cmdk-overlay" onclick="closeCmdK(event)">
+  <div class="cmdk-box">
+    <input class="cmdk-input" id="cmdk-input" placeholder="Rechercher une IP, naviguer, lancer une analyse..." autocomplete="off">
+    <div class="cmdk-results" id="cmdk-results"></div>
+    <div class="cmdk-footer">
+      <span>↑↓ naviguer</span><span>↵ confirmer</span><span>Esc fermer</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODE INCIDENT RESPONSE ═══ -->
+<div class="ir-overlay" id="ir-overlay">
+  <div class="ir-header">
+    <div class="ir-title">⚡ MODE INCIDENT RESPONSE</div>
+    <div style="display:flex;align-items:center;gap:12px">
+      <span id="ir-time" style="font-size:13px;color:#fca5a5;font-family:monospace"></span>
+      <button onclick="closeIR()" style="background:transparent;border:1px solid #7f1d1d;color:#fca5a5;padding:6px 14px;border-radius:6px;cursor:pointer">✕ Quitter IR</button>
+    </div>
+  </div>
+  <div style="text-align:center;padding:16px 24px 0">
+    <div id="ir-score-display" class="ir-score-big"></div>
+    <div id="ir-level" style="font-size:20px;font-weight:700;margin-bottom:8px"></div>
+  </div>
+  <div class="ir-grid">
+    <div class="ir-card">
+      <h2>Top menaces actives</h2>
+      <div id="ir-top-ips" style="font-family:monospace;font-size:13px;line-height:2"></div>
+    </div>
+    <div class="ir-card">
+      <h2>Actions rapides</h2>
+      <div id="ir-actions" style="display:flex;flex-direction:column;gap:8px;margin-top:8px"></div>
+    </div>
+    <div class="ir-card" style="grid-column:1/-1">
+      <h2>Derniers événements</h2>
+      <div id="ir-timeline" style="font-size:12px;font-family:monospace;line-height:1.8;max-height:200px;overflow-y:auto"></div>
+    </div>
+  </div>
+</div>
 
 <div style="text-align:center;font-size:10px;color:#475569;padding:8px;border-top:1px solid #0d1117">
   ViaDigiTech AI SecOps v6 · {hostname} · 15min · seuils CPU {WARN_CPU}/{CRIT_CPU}% · RAM {WARN_MEM}/{CRIT_MEM}% · Disk {WARN_DISK}/{CRIT_DISK}%
@@ -1499,10 +1655,165 @@ function filterSecurity(){{
   spark('sp-disk',disk,'#22c55e');
 }})();
 
+// ── Stubs si pas de clé API ──
+if(typeof apiCall==='undefined'){{window.apiCall=async()=>null;}}
+if(typeof banIP==='undefined'){{window.banIP=()=>showToast("Actions API non configurées",false);}}
+if(typeof unbanIP==='undefined'){{window.unbanIP=()=>showToast("Actions API non configurées",false);}}
+if(typeof addWhitelist==='undefined'){{window.addWhitelist=()=>showToast("Actions API non configurées",false);}}
+if(typeof sendReport==='undefined'){{window.sendReport=()=>showToast("Actions API non configurées",false);}}
+if(typeof askAIWithPrompt==='undefined'){{window.askAIWithPrompt=()=>showToast("Actions API non configurées",false);}}
+
+// ── Export CSV ──
+function exportTable(tableId,name){{
+  const tbl=document.getElementById(tableId);
+  if(!tbl)return;
+  const rows=[...tbl.querySelectorAll('tr')];
+  const csv=rows.map(r=>[...r.cells].map(c=>'"'+c.textContent.trim().replace(/"/g,'""')+'"').join(',')).join('\\n');
+  const blob=new Blob(['\\uFEFF'+csv],{{type:'text/csv;charset=utf-8'}});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=name+'_'+new Date().toISOString().slice(0,10)+'.csv';
+  a.click();
+}}
+
+// ── Ctrl+K Global Search ──
+const _cmdk_nav=[
+  {{id:'overview',icon:'🏠',label:'Vue globale',hint:'Écran principal'}},
+  {{id:'security',icon:'🔒',label:'Sécurité',hint:'IPs, carte, audit'}},
+  {{id:'performance',icon:'📈',label:'Performance',hint:'CPU, RAM, heatmap'}},
+  {{id:'timeline',icon:'🕒',label:'Timeline',hint:'Événements 24h'}},
+  {{id:'infra',icon:'🖥️',label:'Infrastructure',hint:'Services, Docker'}},
+];
+let _cmdk_sel=0;
+function openCmdK(){{
+  document.getElementById('cmdk-overlay').classList.add('open');
+  const inp=document.getElementById('cmdk-input');
+  inp.value='';
+  renderCmdK('');
+  setTimeout(()=>inp.focus(),50);
+}}
+function closeCmdK(e){{
+  if(!e||e.target===document.getElementById('cmdk-overlay'))
+    document.getElementById('cmdk-overlay').classList.remove('open');
+}}
+function renderCmdK(q){{
+  const res=document.getElementById('cmdk-results');
+  const ql=q.toLowerCase();
+  let items=[];
+  if(!ql){{
+    items=_cmdk_nav.map(n=>(`<div class="cmdk-item" onclick="showScreen('${{n.id}}');closeCmdK()"><span class="cmdk-item-icon">${{n.icon}}</span><span class="cmdk-item-label">${{n.label}}</span><span class="cmdk-item-hint">${{n.hint}}</span></div>`));
+  }}else{{
+    _cmdk_nav.filter(n=>n.label.toLowerCase().includes(ql)||n.hint.toLowerCase().includes(ql))
+      .forEach(n=>items.push(`<div class="cmdk-item" onclick="showScreen('${{n.id}}');closeCmdK()"><span class="cmdk-item-icon">${{n.icon}}</span><span class="cmdk-item-label">${{n.label}}</span><span class="cmdk-item-hint">${{n.hint}}</span></div>`));
+    if(/\d/.test(ql)){{
+      items.push(`<div class="cmdk-item" onclick="openWorkbench('${{q}}');closeCmdK()"><span class="cmdk-item-icon">🔍</span><span class="cmdk-item-label">Investiguer ${{q}}</span><span class="cmdk-item-hint">Workbench IP</span></div>`);
+      items.push(`<div class="cmdk-item" onclick="banIP('${{q}}');closeCmdK()"><span class="cmdk-item-icon">🔴</span><span class="cmdk-item-label">Bannir ${{q}}</span><span class="cmdk-item-hint">via Fail2Ban</span></div>`);
+    }}
+    items.push(`<div class="cmdk-item" onclick="askAIWithPrompt('${{q}}');closeCmdK()"><span class="cmdk-item-icon">🤖</span><span class="cmdk-item-label">Analyser : ${{q}}</span><span class="cmdk-item-hint">Question à l'IA SOC</span></div>`);
+  }}
+  res.innerHTML=items.join('')||'<div class="cmdk-item" style="color:#475569">Aucun résultat</div>';
+  _cmdk_sel=0;
+}}
+document.addEventListener('keydown',e=>{{
+  if((e.ctrlKey||e.metaKey)&&e.key==='k'){{e.preventDefault();openCmdK();}}
+  if(e.key==='Escape')closeCmdK();
+}});
+document.getElementById('cmdk-input')?.addEventListener('input',e=>renderCmdK(e.target.value));
+
+// ── Mode IR ──
+function openIR(){{
+  const ol=document.getElementById('ir-overlay');
+  ol.classList.add('open');
+  const score={threat};
+  const color=score>=70?'#ef4444':score>=40?'#f59e0b':'#22c55e';
+  const level=score>=70?'MENACE ÉLEVÉE':score>=40?'MENACE MODÉRÉE':'MENACE FAIBLE';
+  document.getElementById('ir-score-display').textContent=score+'/100';
+  document.getElementById('ir-score-display').style.color=color;
+  document.getElementById('ir-level').textContent=level;
+  document.getElementById('ir-level').style.color=color;
+  const rows=[...document.querySelectorAll('#ip-table tbody tr')].slice(0,5);
+  document.getElementById('ir-top-ips').innerHTML=rows.length?rows.map(r=>{{
+    const cells=[...r.cells];
+    return `<div style="display:flex;justify-content:space-between"><span style="color:#a5b4fc">${{cells[0]?.textContent?.split('🔴')[1]?.split('🟡')[1]?.trim()||cells[0]?.textContent?.trim()}}</span><span style="color:#ef4444">${{cells[1]?.textContent?.trim()}} tent.</span></div>`;
+  }}).join(''):'<div style="color:#475569">Aucune IP active</div>';
+  document.getElementById('ir-actions').innerHTML=`
+    <button onclick="askAIWithPrompt('Analyse de menace urgente : niveau ${{score}}/100, que faire maintenant ?')" class="btn-danger" style="text-align:left">🤖 Analyse IA urgente</button>
+    <button onclick="sendReport(this)" class="btn-primary" style="text-align:left">📋 Générer rapport maintenant</button>
+    <button onclick="showScreen('security');closeIR()" style="background:#1e1b4b;border:1px solid #4338ca;color:#a5b4fc;padding:8px;border-radius:6px;cursor:pointer;text-align:left">🔒 Aller à Sécurité</button>
+  `;
+  window._irTimer=setInterval(()=>{{
+    document.getElementById('ir-time').textContent=new Date().toLocaleTimeString('fr-FR');
+  }},1000);
+}}
+function closeIR(){{
+  document.getElementById('ir-overlay').classList.remove('open');
+  if(window._irTimer)clearInterval(window._irTimer);
+}}
+
+// ── Workbench IP ──
+let _wbIp='';
+function openWorkbench(ip){{
+  _wbIp=ip;
+  document.getElementById('wb-ip-title').textContent=ip;
+  document.getElementById('wb-score').textContent='';
+  document.getElementById('wb-attempts').textContent='';
+  document.getElementById('wb-status').textContent='';
+  document.getElementById('wb-geo').textContent='Chargement...';
+  document.getElementById('wb-ai-result').textContent='';
+  const allRows=[...document.querySelectorAll('#ip-table tbody tr')];
+  const row=allRows.find(r=>r.dataset.ip===ip);
+  const attempts=row?row.cells[1]?.textContent?.trim():'N/A';
+  document.getElementById('wb-attempts').textContent=attempts;
+  const isBanned=row?.cells[0]?.textContent?.includes('🔴');
+  document.getElementById('wb-status').textContent=isBanned?'BANNI':'Actif';
+  document.getElementById('wb-status').style.color=isBanned?'#ef4444':'#f59e0b';
+  document.getElementById('wb-actions').innerHTML=isBanned?
+    `<button onclick="unbanIP('${{ip}}')" class="btn-success">Débannir</button>
+     <button onclick="addWhitelist('${{ip}}')" class="btn-primary" style="font-size:11px">Whitelist</button>`:
+    `<button onclick="banIP('${{ip}}')" class="btn-danger">Bannir</button>
+     <button onclick="addWhitelist('${{ip}}')" class="btn-primary" style="font-size:11px">Whitelist</button>`;
+  const auditRows=[...document.querySelectorAll('#audit-table tbody tr')].filter(r=>r.dataset.ip===ip);
+  const tbody=document.getElementById('wb-history');
+  tbody.innerHTML=auditRows.length?auditRows.map(r=>{{
+    const cells=[...r.cells];
+    return `<tr><td style="font-size:11px;color:#64748b">${{cells[0]?.textContent}}</td><td>${{cells[2]?.innerHTML}}</td><td style="color:#f59e0b">${{cells[3]?.textContent}}</td></tr>`;
+  }}).join(''):'<tr><td colspan="3" style="color:#475569;text-align:center">Aucune action récente</td></tr>';
+  document.getElementById('wb-geo').innerHTML='N/A';
+  document.getElementById('nav-workbench').style.display='block';
+  showScreen('workbench');
+}}
+function wbAnalyze(){{
+  if(!_wbIp)return;
+  const btn=document.getElementById('wb-analyze-btn');
+  const res=document.getElementById('wb-ai-result');
+  res.textContent='Analyse en cours...';
+  apiCall('/analyze',{{prompt:`Analyse cette IP suspecte : ${{_wbIp}}. Quel est son niveau de risque ? Faut-il la bannir définitivement ?`}},btn).then(r=>{{
+    if(r&&r.ok)res.innerHTML=r.response.replace(/\\n/g,'<br>');
+    else res.textContent='Erreur IA';
+  }});
+}}
+
 // ── Actions API ──
 {actions_js}
 </script>
 </body></html>"""
+    # Générer manifest.json PWA
+    manifest = {
+        "name": "ViaDigiTech SOC",
+        "short_name": "SOC",
+        "description": "Dashboard SecOps ViaDigiTech",
+        "start_url": "/soc/",
+        "display": "standalone",
+        "background_color": "#0a0d14",
+        "theme_color": "#6366f1",
+        "icons": [{"src": "icon.svg", "sizes": "any", "type": "image/svg+xml"}]
+    }
+    try:
+        with open(MANIFEST_PATH, "w") as f:
+            json.dump(manifest, f)
+    except Exception as _e:
+        print(f"[Dashboard] ⚠ manifest.json non créé : {_e}")
+
     return html
 
 # ─────────────────────────────────────────
@@ -1514,3 +1825,18 @@ if __name__ == "__main__":
     with open(OUTPUT_FILE, "w") as f:
         f.write(html)
     print(f"[{datetime.now():%H:%M:%S}] Dashboard v6 généré → {OUTPUT_FILE}")
+
+    # Validation JS syntaxique (syntaxe uniquement, pas exécution)
+    try:
+        import subprocess as _sp, tempfile as _tf, os as _os
+        _js = open(OUTPUT_FILE).read().split("<script>")[1].split("</script>")[0]
+        _tmp = _tf.NamedTemporaryFile(suffix='.js', mode='w', delete=False)
+        _tmp.write(_js); _tmp.close()
+        _r = _sp.run(["node", "--check", _tmp.name], capture_output=True, timeout=10)
+        _os.unlink(_tmp.name)
+        if _r.returncode != 0:
+            print(f"[Dashboard] ⚠ Erreur JS détectée : {_r.stderr.decode()[:200]}")
+        else:
+            print(f"[Dashboard] ✓ JS valide")
+    except Exception as _e:
+        pass

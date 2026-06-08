@@ -23,6 +23,8 @@ from email.mime.text import MIMEText
 MAIL_FROM        = os.environ.get("SOC_MAIL_FROM", "secops@viadigitech.com")
 MAIL_TO          = os.environ.get("SOC_MAIL_TO", "david@viadigitech.com").split(",")
 ABUSEIPDB_KEY    = os.environ.get("ABUSEIPDB_KEY", "")
+TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 AUTH_LOG         = "/var/log/auth.log"
 STATE_FILE       = "/tmp/soc_detector_state.txt"
 AUDIT_LOG        = "/home/ubuntu/secops/audit_actions.csv"
@@ -58,6 +60,19 @@ def is_report_running():
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
     return False
+
+def send_telegram(msg):
+    """Envoie une alerte Telegram si configuré."""
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"},
+            timeout=5
+        )
+    except Exception as e:
+        print(f"[Telegram] Erreur : {e}")
 
 # ─────────────────────────────────────────
 # COLLECTE
@@ -214,6 +229,9 @@ def enrich_and_act(top_ips):
             write_audit(ip, action, score, reason)
             actions.append({"ip": ip, "action": action, "score": score, "info": info, "reason": reason})
             print(f"[{'AutoBan' if AUTO_BAN_MODE == 'auto' else 'DryRun'}] {ip} — score {score}% → {action}")
+            if action == "BAN_AUTO":
+                hostname = os.uname().nodename
+                send_telegram(f"🚨 <b>BAN AUTO</b>\nIP: <code>{ip}</code>\nScore: {score}%\nServeur: {hostname}")
 
         elif score >= 40:
             # Zone grise → Ollama décide (sauf si report.py tourne)
@@ -519,6 +537,15 @@ def main():
             ai_analysis = ollama_alert_analysis(alertes, sys_metrics, ssh_fails, new_bans, actions)
         send_alert(alertes, sys_metrics, ssh_fails, top_ips, new_bans, actions, ai_analysis)
         print(f"[{now:%H:%M:%S}] Alerte envoyée à {MAIL_TO}")
+        # Notification Telegram pour alertes critiques
+        critiques = [a for a in alertes if a["niveau"] == "CRITIQUE"]
+        if critiques:
+            hostname = os.uname().nodename
+            msg_lines = [f"⚠️ <b>ALERTE SOC — {hostname}</b>"]
+            for a in critiques:
+                msg_lines.append(f"• {a['message']}")
+            msg_lines.append(f"CPU: {sys_metrics['cpu']:.1f}% | RAM: {sys_metrics['ram']:.1f}% | Disk: {sys_metrics['disk']:.1f}%")
+            send_telegram("\n".join(msg_lines))
     else:
         print(f"[{now:%H:%M:%S}] Aucune alerte. CPU:{sys_metrics['cpu']:.1f}% RAM:{sys_metrics['ram']:.1f}% Disk:{sys_metrics['disk']:.1f}% SSH:{ssh_fails} Bans:{len(new_bans)}")
 
