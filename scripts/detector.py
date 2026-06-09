@@ -8,6 +8,7 @@ import os
 import re
 import json
 import smtplib
+import sys
 
 import subprocess
 import psutil
@@ -17,6 +18,18 @@ from collections import Counter, defaultdict
 import csv
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
+# F7 — Threat Intelligence feeds
+sys.path.insert(0, os.path.dirname(__file__))
+try:
+    from ti_feeds import check_ip_ti, persist_ti_match
+    TI_AVAILABLE = True
+except ImportError:
+    TI_AVAILABLE = False
+    def check_ip_ti(ip):
+        return {"matched": False, "sources": [], "tags": [], "score_bonus": 0}
+    def persist_ti_match(ip, ti_result):
+        pass
 
 # ─────────────────────────────────────────
 # CONFIG
@@ -260,63 +273,188 @@ def ollama_decide(ip, attempts, info):
         print(f"[Ollama] Erreur pour {ip}: {e}")
     return {"action": "SURVEILLE", "raison": "Décision Ollama indisponible", "urgence": "faible"}
 
+# ─────────────────────────────────────────
+# F8 — SCORING ADAPTATIF MULTI-FACTEURS
+# ─────────────────────────────────────────
+
+HIGH_RISK_COUNTRIES = {"CN", "RU", "KP", "IR", "VN", "TW", "NG", "BR", "UA", "RO"}
+MEDIUM_RISK_COUNTRIES = {"TR", "TH", "ID", "PK", "BD", "GH", "MX", "PH"}
+
+
+def count_ip_in_audit(ip, days=7):
+    """Nombre de fois que cette IP apparaît dans l'audit sur les N derniers jours."""
+    since = datetime.now() - timedelta(days=days)
+    count = 0
+    if not os.path.exists(AUDIT_LOG):
+        return 0
+    try:
+        with open(AUDIT_LOG) as f:
+            for line in f:
+                if ip not in line:
+                    continue
+                parts = line.strip().split(",", 4)
+                if len(parts) < 3 or parts[1].strip() != ip:
+                    continue
+                try:
+                    ts = datetime.fromisoformat(parts[0][:19])
+                    if ts >= since:
+                        count += 1
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return count
+
+
+def compute_composite_score(base_score, ip, country, ti_result):
+    """
+    Score composite = score AbuseIPDB + bonus contextuels.
+    Maintient la logique existante, enrichit avec TI / récidive / pays / heure.
+    """
+    bonus = 0
+
+    # TI feeds match → +20
+    bonus += ti_result.get("score_bonus", 0)
+
+    # Récidive 7 jours → jusqu'à +15
+    recidive = count_ip_in_audit(ip, days=7)
+    if recidive >= 5:
+        bonus += 15
+    elif recidive >= 3:
+        bonus += 10
+    elif recidive >= 1:
+        bonus += 4
+
+    # Pays à risque → +8 ou +4
+    if country in HIGH_RISK_COUNTRIES:
+        bonus += 8
+    elif country in MEDIUM_RISK_COUNTRIES:
+        bonus += 4
+
+    # Heure nocturne (22h-6h) ou WE → +5
+    now = datetime.now()
+    if now.hour < 6 or now.hour >= 22 or now.weekday() >= 5:
+        bonus += 5
+
+    return min(base_score + bonus, 100)
+
+
+# ─────────────────────────────────────────
+# F9 — RÉPONSE GRADUÉE
+# ─────────────────────────────────────────
+
+BAN_TEMP_SCORE = 70   # score composite ≥ 70 → BAN_TEMP
+# AUTO_BAN_SCORE (80) défini en config reste le seuil BAN_AUTO
+
+
 def enrich_and_act(top_ips):
-    """Vérifie les top IPs sur AbuseIPDB et agit selon le mode + Ollama pour zone grise."""
+    """
+    Vérifie les top IPs sur AbuseIPDB + TI feeds (F7), calcule le score composite (F8)
+    et applique la réponse graduée (F9) :
+      composite ≥ AUTO_BAN_SCORE (80) → BAN_AUTO
+      composite ≥ BAN_TEMP_SCORE  (70) → BAN_TEMP
+      composite ≥ 40               → Ollama décide (zone grise)
+      composite < 40               → SURVEILLE
+    """
     actions = []
+    hostname = os.uname().nodename
+
     for ip, attempts in top_ips.most_common(5):
         info = check_abuseipdb(ip)
         if not info:
             continue
-        score = info["score"]
-        reason = f"{attempts} tentatives, score {score}%, {info['country']}, {info['isp']}"
 
-        if score >= AUTO_BAN_SCORE:
-            # Score élevé → ban direct
+        abuse_score = info["score"]
+        country     = info.get("country", "")
+
+        # F7 — TI check
+        ti_result = check_ip_ti(ip)
+        if ti_result.get("matched"):
+            persist_ti_match(ip, ti_result)
+            ti_tag = f" | TI: {', '.join(ti_result['sources'])} [{', '.join(ti_result['tags'])}]"
+        else:
+            ti_tag = ""
+
+        # F8 — Score composite
+        composite = compute_composite_score(abuse_score, ip, country, ti_result)
+
+        reason = (
+            f"{attempts} tentatives, AbuseIPDB {abuse_score}%, "
+            f"composite {composite}%, {country}, {info['isp']}{ti_tag}"
+        )
+
+        # F9 — Réponse graduée
+        if composite >= AUTO_BAN_SCORE:
+            # Tier 1 : BAN définitif
             if AUTO_BAN_MODE == "auto":
                 success = ban_ip_fail2ban(ip)
-                action = "BAN_AUTO" if success else "BAN_ECHEC"
+                action  = "BAN_AUTO" if success else "BAN_ECHEC"
             else:
                 action = "DRYRUN_BAN"
-            write_audit(ip, action, score, reason)
+            write_audit(ip, action, composite, reason)
             if action == "BAN_AUTO":
-                update_threat_patterns(ip, "BAN_AUTO", score)
-            actions.append({"ip": ip, "action": action, "score": score, "info": info, "reason": reason})
-            print(f"[{'AutoBan' if AUTO_BAN_MODE == 'auto' else 'DryRun'}] {ip} — score {score}% → {action}")
+                update_threat_patterns(ip, "BAN_AUTO", composite)
+            actions.append({"ip": ip, "action": action, "score": composite, "info": info, "reason": reason})
+            print(f"[AutoBan] {ip} — composite {composite}% → {action}")
             if action == "BAN_AUTO":
-                hostname = os.uname().nodename
-                send_telegram(f"🚨 <b>BAN AUTO</b>\nIP: <code>{ip}</code>\nScore: {score}%\nServeur: {hostname}")
+                ti_line = f"\nTI: {', '.join(ti_result['sources'])}" if ti_result.get("matched") else ""
+                send_telegram(
+                    f"🚨 <b>BAN AUTO</b>\nIP: <code>{ip}</code>\n"
+                    f"Score: {composite}% (AbuseIPDB {abuse_score}%){ti_line}\n"
+                    f"Serveur: {hostname}"
+                )
 
-        elif score >= 40:
-            # Zone grise → Ollama décide (sauf si report.py tourne)
+        elif composite >= BAN_TEMP_SCORE:
+            # Tier 2 : BAN temporaire (score élevé mais sous le seuil définitif)
+            if AUTO_BAN_MODE == "auto":
+                success = ban_ip_fail2ban(ip)
+                action  = "BAN_TEMP" if success else "BAN_ECHEC"
+            else:
+                action = "DRYRUN_BAN_TEMP"
+            write_audit(ip, action, composite, reason)
+            if action == "BAN_TEMP":
+                update_threat_patterns(ip, "BAN_TEMP", composite)
+            actions.append({"ip": ip, "action": action, "score": composite, "info": info, "reason": reason})
+            print(f"[BanTemp] {ip} — composite {composite}% → {action}")
+            if action == "BAN_TEMP":
+                ti_line = f"\nTI: {', '.join(ti_result['sources'])}" if ti_result.get("matched") else ""
+                send_telegram(
+                    f"⚠️ <b>BAN TEMPORAIRE</b>\nIP: <code>{ip}</code>\n"
+                    f"Score: {composite}%{ti_line}\n"
+                    f"Serveur: {hostname}"
+                )
+
+        elif composite >= 40:
+            # Tier 3 : Zone grise → Ollama
             if is_report_running():
                 print(f"[Ollama] Zone grise {ip} — report.py actif, décision différée")
                 decision = {"action": "SURVEILLE", "raison": "Décision différée (report.py actif)", "urgence": "faible"}
             else:
-                print(f"[Ollama] Zone grise {ip} (score {score}%) — consultation qwen2.5:3b...")
+                print(f"[Ollama] Zone grise {ip} (composite {composite}%) — consultation qwen2.5:3b...")
                 decision = ollama_decide(ip, attempts, info)
-            ollama_action = decision.get("action", "SURVEILLE")
-            ollama_raison = decision.get("raison", "")
+            ollama_action  = decision.get("action", "SURVEILLE")
+            ollama_raison  = decision.get("raison", "")
             ollama_urgence = decision.get("urgence", "faible")
-            reason_full = f"{reason} | Ollama: {ollama_raison} (urgence: {ollama_urgence})"
+            reason_full    = f"{reason} | Ollama: {ollama_raison} (urgence: {ollama_urgence})"
 
             if ollama_action == "BAN" and AUTO_BAN_MODE == "auto":
                 success = ban_ip_fail2ban(ip)
-                action = f"BAN_OLLAMA" if success else "BAN_ECHEC"
+                action  = "BAN_OLLAMA" if success else "BAN_ECHEC"
             else:
                 action = f"OLLAMA_{ollama_action}"
 
-            write_audit(ip, action, score, reason_full)
+            write_audit(ip, action, composite, reason_full)
             if action == "BAN_OLLAMA":
-                update_threat_patterns(ip, "BAN_OLLAMA", score)
+                update_threat_patterns(ip, "BAN_OLLAMA", composite)
             actions.append({
-                "ip": ip, "action": action, "score": score,
-                "info": info, "reason": reason_full,
-                "ollama": decision
+                "ip": ip, "action": action, "score": composite,
+                "info": info, "reason": reason_full, "ollama": decision
             })
             print(f"[Ollama] {ip} → {action} ({ollama_raison})")
 
         else:
-            actions.append({"ip": ip, "action": "SURVEILLE", "score": score, "info": info, "reason": reason})
+            # Tier 4 : surveillance passive
+            actions.append({"ip": ip, "action": "SURVEILLE", "score": composite, "info": info, "reason": reason})
 
     return actions
 

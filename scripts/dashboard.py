@@ -188,6 +188,17 @@ def get_ai_summary():
     except:
         return None
 
+TI_MATCHES_FILE = "/home/ubuntu/secops/ti_matches.json"
+
+def _load_ti_matches():
+    try:
+        if os.path.exists(TI_MATCHES_FILE):
+            with open(TI_MATCHES_FILE) as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
 def append_metrics_history(metrics):
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     new_line = f"{now_str},{metrics['cpu']:.1f},{metrics['ram']:.1f},{metrics['disk']:.1f}\n"
@@ -474,6 +485,54 @@ def gauge(label, val, unit="%", warn=75, crit=88, sub=""):
       {sub_html}
     </div>"""
 
+def _build_predict_tab(ai_summary):
+    """Génère le contenu HTML de l'onglet IA Prédictive (F6)."""
+    predict = ai_summary.get("predictive", {}) if ai_summary else {}
+    if not predict or predict.get("error"):
+        content = (
+            "<div style='color:#475569;font-size:13px;text-align:center;padding:24px 0'>"
+            "Aucune analyse prédictive disponible.<br>"
+            "<span style='font-size:11px;opacity:.6'>Exécute predict_ai.py chaque lundi à 07h00 via cron.</span>"
+            "</div>"
+        )
+    else:
+        ts         = predict.get("ts", "")
+        tendances  = predict.get("tendances", "—")
+        vecteurs   = predict.get("vecteurs", "—")
+        recos      = predict.get("recommandations", [])
+        recos_html = ""
+        for i, r in enumerate(recos, 1):
+            recos_html += (
+                f"<div style='display:flex;gap:10px;align-items:flex-start;padding:8px 0;"
+                f"border-bottom:1px solid #1e2942'>"
+                f"<span style='font-size:18px;font-weight:800;color:#6366f1;min-width:24px'>{i}</span>"
+                f"<span style='font-size:12px;color:#cbd5e1;line-height:1.6'>{r}</span></div>"
+            )
+        bans_w   = predict.get("week_bans", "—")
+        watch_w  = predict.get("week_watches", "—")
+        content = (
+            f"<div style='font-size:10px;color:#475569;margin-bottom:12px;text-align:right'>"
+            f"Généré le {ts} · {bans_w} bans · {watch_w} surveillées</div>"
+            f"<div style='margin-bottom:14px'>"
+            f"<div style='font-size:10px;font-weight:700;color:#6366f1;letter-spacing:1px;"
+            f"text-transform:uppercase;margin-bottom:6px'>Tendances identifiées</div>"
+            f"<div style='font-size:12px;color:#e2e8f0;line-height:1.7;background:#0a0d14;"
+            f"border-radius:8px;padding:12px;border:1px solid #1e2942'>{tendances}</div></div>"
+            f"<div style='margin-bottom:14px'>"
+            f"<div style='font-size:10px;font-weight:700;color:#ef4444;letter-spacing:1px;"
+            f"text-transform:uppercase;margin-bottom:6px'>Vecteurs émergents à surveiller</div>"
+            f"<div style='font-size:12px;color:#e2e8f0;line-height:1.7;background:#0a0d14;"
+            f"border-radius:8px;padding:12px;border:1px solid #1e2942'>{vecteurs}</div></div>"
+            f"<div><div style='font-size:10px;font-weight:700;color:#22c55e;letter-spacing:1px;"
+            f"text-transform:uppercase;margin-bottom:6px'>Recommandations pour cette semaine</div>"
+            f"{recos_html}</div>"
+        )
+    return (
+        f"<div id='tab-predict' class='tab-pane' style='display:none;background:#0a0d14;"
+        f"border:1px solid rgba(99,102,241,.2);border-radius:8px;padding:16px'>{content}</div>"
+    )
+
+
 # ─────────────────────────────────────────
 # BUILD HTML
 # ─────────────────────────────────────────
@@ -510,6 +569,7 @@ def build_html():
     det_log    = get_detector_log(20)
     containers = get_docker_containers()
     ai_summary = get_ai_summary()
+    ti_matches = _load_ti_matches()
     hostname   = os.uname().nodename
     hist_labels, hist_bans, hist_watches = get_bans_history(7)
     srv_status = get_service_status()
@@ -627,7 +687,13 @@ def build_html():
         loc = f"<span style='color:#475569;font-size:10px;margin-left:6px'>{geo.get('cc','')} {geo.get('city','')}</span>" if geo else ""
         btn = f"""<button onclick="banIP('{ip}')" class="btn-danger">Bannir</button>""" if ACTIONS_KEY else ""
         ip_link = f"<span onclick=\"openWorkbench('{ip}')\" style=\"cursor:pointer;color:#a5b4fc;text-decoration:underline dotted\">{ip}</span>"
-        top_ip_rows += f"<tr data-ip='{ip}'><td style='font-family:monospace;font-size:12px'>{is_banned} {ip_link}{loc}{btn}</td><td style='text-align:right;font-weight:700;color:#ef4444'>{count}</td></tr>"
+        # Badge TI si IP connue dans les feeds
+        ti_badge = ""
+        if ip in ti_matches:
+            ti_src = ti_matches[ip].get("sources", [])
+            ti_label = ti_src[0][:14] if ti_src else "TI"
+            ti_badge = f"<span style='font-size:9px;font-weight:700;background:#7c3aed22;color:#a78bfa;border:1px solid #7c3aed55;border-radius:4px;padding:1px 5px;margin-left:4px' title='Threat Intel: {ti_label}'>🦠 TI</span>"
+        top_ip_rows += f"<tr data-ip='{ip}'><td style='font-family:monospace;font-size:12px'>{is_banned} {ip_link}{ti_badge}{loc}{btn}</td><td style='text-align:right;font-weight:700;color:#ef4444'>{count}</td></tr>"
 
     # ── Connexions légitimes ──
     accepted_html = ""
@@ -642,12 +708,18 @@ def build_html():
         if "BAN_AUTO" in action or "BAN_OLLAMA" in action:
             badge = f"<span class='badge badge-red'>{action}</span>"
             atype = "ban"
+        elif "BAN_TEMP" in action:
+            badge = f"<span class='badge badge-orange'>{action}</span>"
+            atype = "ban"
         elif "UNBAN" in action:
             badge = f"<span class='badge badge-green'>{action}</span>"
             atype = "unban"
         elif "DRYRUN" in action:
             badge = f"<span class='badge badge-orange'>{action}</span>"
             atype = "dryrun"
+        elif "LOW_SLOW" in action or "WATCH_RISK" in action:
+            badge = f"<span class='badge badge-orange'>{action}</span>"
+            atype = "analyze"
         elif "OLLAMA" in action or "SURVEILLE" in action:
             badge = f"<span class='badge badge-purple'>{action}</span>"
             atype = "analyze"
@@ -696,10 +768,12 @@ def build_html():
     <button onclick="showTab('tab-morning')" id="btn-morning" class="tab-btn tab-active">Synthèse</button>
     <button onclick="showTab('tab-security')" id="btn-security" class="tab-btn">Sécurité</button>
     <button onclick="showTab('tab-perf')" id="btn-perf" class="tab-btn">Performance</button>
+    <button onclick="showTab('tab-predict')" id="btn-predict" class="tab-btn">🔮 Prédictive</button>
   </div>
   <div id="tab-morning" class="tab-pane" style="background:#0a0d14;border:1px solid #1e2942;border-radius:8px;padding:16px;font-size:13px;line-height:1.85;color:#e2e8f0">{fmt(ai_summary.get("morning","Non disponible"))}</div>
   <div id="tab-security" class="tab-pane" style="display:none;background:#0a0d14;border:1px solid #1e2942;border-radius:8px;padding:16px;font-size:13px;line-height:1.85;color:#e2e8f0">{fmt(ai_summary.get("security","Non disponible"))}</div>
   <div id="tab-perf" class="tab-pane" style="display:none;background:#0a0d14;border:1px solid #1e2942;border-radius:8px;padding:16px;font-size:13px;line-height:1.85;color:#e2e8f0">{fmt(ai_summary.get("perf","Non disponible"))}</div>
+  {_build_predict_tab(ai_summary)}
   <div style="margin-top:12px;padding:8px 12px;background:#1a1008;border:1px solid #78350f;border-radius:6px;font-size:11px;color:#fbbf24">
     ⚠️ <strong>Avertissement :</strong> Analyse générée par LLM local (qwen2.5:3b). Les commandes système suggérées peuvent être invalides — vérifier manuellement avant toute exécution.
   </div>
