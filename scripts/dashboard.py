@@ -1908,7 +1908,7 @@ async function testTelegram(btn){{
   if(!token||!chatId){{showToast('Renseignez le token et le chat ID',false);return;}}
   const saveR=await apiCall('/config',{{telegram_token:token,telegram_chat_id:chatId}},null);
   if(!saveR||!saveR.ok){{showToast('Erreur sauvegarde config',false);return;}}
-  const r=await apiCall('/notify/telegram',{{message:'🛡️ <b>ViaDigiTech SOC</b> — Test de notification Telegram ✓\nConfiguration opérationnelle.'}},btn);
+  const r=await apiCall('/notify/telegram',{{message:'🛡️ <b>ViaDigiTech SOC</b> — Test de notification Telegram ✓\\nConfiguration opérationnelle.'}},btn);
   if(r)showToast(r.ok?'✓ Message Telegram envoyé !':'Erreur: '+(r.error||'inconnue'),r.ok);
 }}
 (function(){{loadSettingsFromServer();setTimeout(animateCounters,200);}})();

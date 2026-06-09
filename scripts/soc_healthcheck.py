@@ -11,19 +11,16 @@ import time
 import requests
 from datetime import datetime
 
-HEALTH_FILE   = "/home/ubuntu/secops/soc_health.json"
-STATE_FILE    = "/tmp/soc_detector_state.txt"
-ABUSEIPDB_KEY = os.environ.get("ABUSEIPDB_KEY", "")
+HEALTH_FILE    = "/home/ubuntu/secops/soc_health.json"
+DETECTOR_LOG   = "/home/ubuntu/secops/detector.log"
+ABUSEIPDB_KEY  = os.environ.get("ABUSEIPDB_KEY", "")
 
 
 def check_ollama():
+    """Vérifie qu'Ollama répond sur son API (sans inférence = rapide)."""
     try:
         start = time.time()
-        r = requests.post(
-            "http://localhost:11434/api/generate",
-            json={"model": "qwen2.5:3b", "prompt": "ping", "stream": False},
-            timeout=10
-        )
+        r = requests.get("http://localhost:11434/api/tags", timeout=5)
         latency_ms = int((time.time() - start) * 1000)
         return {"ok": r.status_code == 200, "latency_ms": latency_ms}
     except Exception as e:
@@ -51,11 +48,11 @@ def check_disk_logs():
 
 
 def check_detector_last_run():
-    """Vérifie que detector.py s'est exécuté il y a moins de 20 minutes."""
+    """Vérifie que detector.py s'est exécuté il y a moins de 20 minutes (via detector.log)."""
     try:
-        if not os.path.exists(STATE_FILE):
-            return {"ok": False, "error": "Fichier état introuvable"}
-        age_minutes = int((time.time() - os.path.getmtime(STATE_FILE)) / 60)
+        if not os.path.exists(DETECTOR_LOG):
+            return {"ok": False, "error": "detector.log introuvable"}
+        age_minutes = int((time.time() - os.path.getmtime(DETECTOR_LOG)) / 60)
         return {"ok": age_minutes < 20, "minutes_ago": age_minutes}
     except Exception as e:
         return {"ok": False, "error": str(e)}
