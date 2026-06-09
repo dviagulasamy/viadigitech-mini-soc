@@ -295,7 +295,11 @@ SOC_CONFIG_DEFAULTS = {
     "crit_disk": 88,
     "warn_ram": 75,
     "crit_ram": 90,
+    "warn_cpu": 70,
+    "crit_cpu": 85,
     "sse_interval": 30,
+    "autologout": 0,
+    "notif_level": "all",
     "oncall": False,
     "oncall_name": "David"
 }
@@ -346,14 +350,15 @@ def set_config():
     data = request.get_json(force=True) or {}
     cfg = load_soc_config()
     # Valider et mettre à jour uniquement les clés connues
-    allowed_int = ["ban_threshold", "warn_disk", "crit_disk", "warn_ram", "crit_ram", "sse_interval"]
+    allowed_int = ["ban_threshold", "warn_disk", "crit_disk", "warn_ram", "crit_ram",
+                   "warn_cpu", "crit_cpu", "sse_interval", "autologout"]
     allowed_bool = ["oncall"]
     allowed_str = ["oncall_name"]
     for k in allowed_int:
         if k in data:
             try:
                 val = int(data[k])
-                if 0 <= val <= 100:
+                if 0 <= val <= 500:
                     cfg[k] = val
             except (ValueError, TypeError):
                 pass
@@ -363,6 +368,8 @@ def set_config():
     for k in allowed_str:
         if k in data:
             cfg[k] = str(data[k])[:50]
+    if "notif_level" in data and data["notif_level"] in ("all", "critical", "multi"):
+        cfg["notif_level"] = data["notif_level"]
     try:
         with open(SOC_CONFIG_FILE, "w") as f:
             json.dump(cfg, f, indent=2)

@@ -583,16 +583,33 @@ def main():
                 })
 
     if alertes:
-        if is_report_running():
-            print(f"[{now:%H:%M:%S}] {len(alertes)} alerte(s) → report.py actif, analyse IA skippée (contention CPU)")
-            ai_analysis = None
-        else:
-            print(f"[{now:%H:%M:%S}] {len(alertes)} alerte(s) → analyse IA + envoi mail...")
-            ai_analysis = ollama_alert_analysis(alertes, sys_metrics, ssh_fails, new_bans, actions)
-        send_alert(alertes, sys_metrics, ssh_fails, top_ips, new_bans, actions, ai_analysis)
-        print(f"[{now:%H:%M:%S}] Alerte envoyée à {MAIL_TO}")
-        # Notification Telegram pour alertes critiques
+        # Filtre notif_level depuis soc_config.json
+        notif_level = "all"
+        try:
+            with open("/home/ubuntu/secops/soc_config.json") as _f:
+                notif_level = json.load(_f).get("notif_level", "all")
+        except Exception:
+            pass
         critiques = [a for a in alertes if a["niveau"] == "CRITIQUE"]
+        if notif_level == "critical":
+            alertes_to_send = [a for a in alertes if a["niveau"] == "CRITIQUE"]
+        elif notif_level == "multi":
+            alertes_to_send = alertes if len(alertes) >= 2 else []
+        else:
+            alertes_to_send = alertes
+
+        if alertes_to_send:
+            if is_report_running():
+                print(f"[{now:%H:%M:%S}] {len(alertes_to_send)} alerte(s) → report.py actif, analyse IA skippée (contention CPU)")
+                ai_analysis = None
+            else:
+                print(f"[{now:%H:%M:%S}] {len(alertes_to_send)} alerte(s) → analyse IA + envoi mail...")
+                ai_analysis = ollama_alert_analysis(alertes_to_send, sys_metrics, ssh_fails, new_bans, actions)
+            send_alert(alertes_to_send, sys_metrics, ssh_fails, top_ips, new_bans, actions, ai_analysis)
+            print(f"[{now:%H:%M:%S}] Alerte envoyée à {MAIL_TO}")
+        else:
+            print(f"[{now:%H:%M:%S}] {len(alertes)} alerte(s) filtrée(s) (niveau: {notif_level})")
+        # Telegram toujours sur les critiques, indépendamment du filtre mail
         if critiques:
             hostname = os.uname().nodename
             msg_lines = [f"⚠️ <b>ALERTE SOC — {hostname}</b>"]

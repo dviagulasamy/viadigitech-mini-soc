@@ -30,6 +30,21 @@ WARN_CPU, CRIT_CPU   = 70, 85
 WARN_MEM, CRIT_MEM   = 75, 88
 WARN_DISK, CRIT_DISK = 75, 88
 
+def _load_thresholds():
+    try:
+        with open("/home/ubuntu/secops/soc_config.json") as f:
+            cfg = json.load(f)
+        global WARN_CPU, CRIT_CPU, WARN_MEM, CRIT_MEM, WARN_DISK, CRIT_DISK
+        WARN_CPU  = cfg.get("warn_cpu",  WARN_CPU)
+        CRIT_CPU  = cfg.get("crit_cpu",  CRIT_CPU)
+        WARN_MEM  = cfg.get("warn_ram",  WARN_MEM)
+        CRIT_MEM  = cfg.get("crit_ram",  CRIT_MEM)
+        WARN_DISK = cfg.get("warn_disk", WARN_DISK)
+        CRIT_DISK = cfg.get("crit_disk", CRIT_DISK)
+    except Exception:
+        pass
+_load_thresholds()
+
 ACTIONS_API = "/action"
 ACTIONS_KEY = os.environ.get("SOC_ACTIONS_KEY", "")
 
@@ -1153,20 +1168,43 @@ tr:last-child td{{border-bottom:none}}
       <input class="settings-input" id="cfg-ban-threshold" type="number" min="50" max="100" value="80">
     </div>
     <div class="settings-row">
-      <div><div class="settings-label">Alerte disque warn</div></div>
-      <input class="settings-input" id="cfg-warn-disk" type="number" min="50" max="95" value="75">
+      <div><div class="settings-label">CPU warn / crit %</div></div>
+      <div style="display:flex;gap:6px">
+        <input class="settings-input" id="cfg-warn-cpu" type="number" min="40" max="95" value="70" title="Warning">
+        <input class="settings-input" id="cfg-crit-cpu" type="number" min="50" max="99" value="85" title="Critique">
+      </div>
     </div>
     <div class="settings-row">
-      <div><div class="settings-label">Alerte disque crit</div></div>
-      <input class="settings-input" id="cfg-crit-disk" type="number" min="60" max="99" value="88">
+      <div><div class="settings-label">Disque warn / crit %</div></div>
+      <div style="display:flex;gap:6px">
+        <input class="settings-input" id="cfg-warn-disk" type="number" min="50" max="95" value="75">
+        <input class="settings-input" id="cfg-crit-disk" type="number" min="60" max="99" value="88">
+      </div>
     </div>
     <div class="settings-row">
-      <div><div class="settings-label">Alerte RAM warn</div></div>
-      <input class="settings-input" id="cfg-warn-ram" type="number" min="50" max="95" value="75">
+      <div><div class="settings-label">RAM warn / crit %</div></div>
+      <div style="display:flex;gap:6px">
+        <input class="settings-input" id="cfg-warn-ram" type="number" min="50" max="95" value="75">
+        <input class="settings-input" id="cfg-crit-ram" type="number" min="60" max="99" value="90">
+      </div>
     </div>
+  </div>
+  <div class="settings-section">
+    <div class="settings-section-title">Alertes email</div>
     <div class="settings-row">
-      <div><div class="settings-label">Alerte RAM crit</div></div>
-      <input class="settings-input" id="cfg-crit-ram" type="number" min="60" max="99" value="90">
+      <div><div class="settings-label">Niveau minimum</div><div class="settings-sub">Filtre les mails du détecteur</div></div>
+      <select class="settings-input" id="cfg-notif-level" style="width:auto;padding:5px 8px;cursor:pointer">
+        <option value="all">Toutes</option>
+        <option value="critical">Critiques</option>
+        <option value="multi">Multi (≥2)</option>
+      </select>
+    </div>
+  </div>
+  <div class="settings-section">
+    <div class="settings-section-title">Sécurité session</div>
+    <div class="settings-row">
+      <div><div class="settings-label">Auto-logout</div><div class="settings-sub">Minutes d'inactivité (0 = désactivé)</div></div>
+      <input class="settings-input" id="cfg-autologout" type="number" min="0" max="480" value="0" onchange="applyAutologout()">
     </div>
   </div>
   <button class="settings-save-btn" onclick="saveSettings()">💾 Sauvegarder</button>
@@ -1618,6 +1656,25 @@ async function doLogin(){{
 }})();
 document.getElementById('login-key')?.addEventListener('keydown',e=>{{if(e.key==='Enter')doLogin();}});
 
+// ── Auto-logout inactivité ──
+let _inactivityTimer=null;
+function applyAutologout(){{
+  clearTimeout(_inactivityTimer);
+  const minutes=parseInt(document.getElementById('cfg-autologout')?.value||0);
+  if(!minutes||minutes<=0)return;
+  _inactivityTimer=setTimeout(()=>{{
+    if(sessionStorage.getItem('soc_auth')==='1'){{
+      sessionStorage.removeItem('soc_auth');
+      sessionStorage.removeItem('soc_api_key');
+      document.getElementById('login-overlay').classList.add('open');
+      if(typeof showToast==='function')showToast('Session expirée — déconnexion automatique',false);
+    }}
+  }},minutes*60*1000);
+}}
+['mousemove','keydown','click','touchstart'].forEach(e=>
+  document.addEventListener(e,applyAutologout,{{passive:true}})
+);
+
 // ── Settings panel ──
 function openSettings(){{
   loadSettingsFromServer();
@@ -1636,12 +1693,17 @@ async function loadSettingsFromServer(){{
     if(el('cfg-oncall'))el('cfg-oncall').checked=!!cfg.oncall;
     if(el('cfg-sse'))el('cfg-sse').value=cfg.sse_interval||30;
     if(el('cfg-ban-threshold'))el('cfg-ban-threshold').value=cfg.ban_threshold||80;
+    if(el('cfg-warn-cpu'))el('cfg-warn-cpu').value=cfg.warn_cpu||70;
+    if(el('cfg-crit-cpu'))el('cfg-crit-cpu').value=cfg.crit_cpu||85;
     if(el('cfg-warn-disk'))el('cfg-warn-disk').value=cfg.warn_disk||75;
     if(el('cfg-crit-disk'))el('cfg-crit-disk').value=cfg.crit_disk||88;
     if(el('cfg-warn-ram'))el('cfg-warn-ram').value=cfg.warn_ram||75;
     if(el('cfg-crit-ram'))el('cfg-crit-ram').value=cfg.crit_ram||90;
+    if(el('cfg-notif-level'))el('cfg-notif-level').value=cfg.notif_level||'all';
+    if(el('cfg-autologout'))el('cfg-autologout').value=cfg.autologout||0;
     if(el('cfg-theme'))el('cfg-theme').checked=document.body.classList.contains('theme-light');
     updateOncallBadge(!!cfg.oncall);
+    applyAutologout();
   }}catch(e){{}}
 }}
 async function saveSettings(){{
@@ -1651,10 +1713,14 @@ async function saveSettings(){{
     oncall:el('cfg-oncall')?.checked||false,
     sse_interval:parseInt(el('cfg-sse')?.value||30),
     ban_threshold:parseInt(el('cfg-ban-threshold')?.value||80),
+    warn_cpu:parseInt(el('cfg-warn-cpu')?.value||70),
+    crit_cpu:parseInt(el('cfg-crit-cpu')?.value||85),
     warn_disk:parseInt(el('cfg-warn-disk')?.value||75),
     crit_disk:parseInt(el('cfg-crit-disk')?.value||88),
     warn_ram:parseInt(el('cfg-warn-ram')?.value||75),
-    crit_ram:parseInt(el('cfg-crit-ram')?.value||90)
+    crit_ram:parseInt(el('cfg-crit-ram')?.value||90),
+    notif_level:el('cfg-notif-level')?.value||'all',
+    autologout:parseInt(el('cfg-autologout')?.value||0)
   }};
   try{{
     const r=await fetch('/action/config',{{method:'POST',headers:{{'Content-Type':'application/json','X-SOC-Key':key}},body:JSON.stringify(payload)}});
