@@ -13,7 +13,7 @@ import subprocess
 import psutil
 import requests
 from datetime import datetime, timedelta
-from collections import Counter
+from collections import Counter, defaultdict
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -619,6 +619,70 @@ def main():
             send_telegram("\n".join(msg_lines))
     else:
         print(f"[{now:%H:%M:%S}] Aucune alerte. CPU:{sys_metrics['cpu']:.1f}% RAM:{sys_metrics['ram']:.1f}% Disk:{sys_metrics['disk']:.1f}% SSH:{ssh_fails} Bans:{len(new_bans)}")
+
+    check_subnet_auto_ban()
+
+def check_subnet_auto_ban():
+    """Ban automatique d'un /24 si ≥ N IPs distinctes bannies dans la dernière heure."""
+    try:
+        with open("/home/ubuntu/secops/soc_config.json") as f:
+            cfg = json.load(f)
+        enabled   = cfg.get("subnet_ban_enabled", False)
+        threshold = int(cfg.get("subnet_ban_threshold", 3))
+    except Exception:
+        return
+
+    if not enabled:
+        return
+
+    since = datetime.now() - timedelta(hours=1)
+    subnet_ips = defaultdict(set)
+
+    if os.path.exists(AUDIT_LOG):
+        with open(AUDIT_LOG) as f:
+            for line in f:
+                if line.startswith("timestamp"):
+                    continue
+                parts = line.strip().split(",", 4)
+                if len(parts) < 3:
+                    continue
+                if "BAN_AUTO" not in parts[2] and "BAN_OLLAMA" not in parts[2]:
+                    continue
+                try:
+                    ts = datetime.strptime(parts[0][:19], "%Y-%m-%d %H:%M:%S")
+                    if ts < since:
+                        continue
+                except Exception:
+                    continue
+                ip = parts[1].strip()
+                ip_parts = ip.split(".")
+                if len(ip_parts) == 4:
+                    subnet = f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}.0/24"
+                    subnet_ips[subnet].add(ip)
+
+    for subnet, ips in subnet_ips.items():
+        if len(ips) < threshold:
+            continue
+        key = f"subnet_ban_{subnet}"
+        if already_alerted(key, minutes=360):
+            continue
+        try:
+            result = subprocess.run(
+                ["sudo", "fail2ban-client", "set", "sshd", "banip", subnet],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                top5 = ", ".join(sorted(ips)[:5])
+                write_audit(subnet, "BAN_SUBNET24", 100,
+                            f"{len(ips)} IPs distinctes en 1h: {top5}")
+                mark_alerted(key)
+                print(f"[BanSubnet] {subnet} → BAN_SUBNET24 ({len(ips)} IPs: {top5})")
+                hostname = os.uname().nodename
+                send_telegram(f"🚨 <b>BAN /24</b>\nBloc: <code>{subnet}</code>\n{len(ips)} IPs distinctes bannies en 1h\nServeur: {hostname}")
+            else:
+                print(f"[BanSubnet] {subnet} → échec: {result.stderr.strip()}")
+        except Exception as e:
+            print(f"[BanSubnet] Erreur pour {subnet}: {e}")
 
 if __name__ == "__main__":
     main()

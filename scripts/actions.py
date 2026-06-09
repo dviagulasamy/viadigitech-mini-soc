@@ -301,7 +301,12 @@ SOC_CONFIG_DEFAULTS = {
     "autologout": 0,
     "notif_level": "all",
     "oncall": False,
-    "oncall_name": "David"
+    "oncall_name": "David",
+    "f2b_bantime": 3600,
+    "f2b_maxretry": 5,
+    "f2b_findtime": 600,
+    "subnet_ban_enabled": False,
+    "subnet_ban_threshold": 3,
 }
 
 def load_soc_config():
@@ -351,8 +356,9 @@ def set_config():
     cfg = load_soc_config()
     # Valider et mettre à jour uniquement les clés connues
     allowed_int = ["ban_threshold", "warn_disk", "crit_disk", "warn_ram", "crit_ram",
-                   "warn_cpu", "crit_cpu", "sse_interval", "autologout"]
-    allowed_bool = ["oncall"]
+                   "warn_cpu", "crit_cpu", "sse_interval", "autologout",
+                   "f2b_bantime", "f2b_maxretry", "f2b_findtime", "subnet_ban_threshold"]
+    allowed_bool = ["oncall", "subnet_ban_enabled"]
     allowed_str = ["oncall_name"]
     for k in allowed_int:
         if k in data:
@@ -374,6 +380,76 @@ def set_config():
         with open(SOC_CONFIG_FILE, "w") as f:
             json.dump(cfg, f, indent=2)
         return jsonify({"ok": True, "config": cfg})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+IMGDIR_REPORTS = "/var/www/html/viadigitech-reports"
+GEO_CACHE_FILE = "/home/ubuntu/secops/geo_cache.json"
+
+@app.route("/fail2ban/status", methods=["GET"])
+@require_key
+def fail2ban_status():
+    """Lit les paramètres actuels de la jail sshd Fail2Ban."""
+    result = {}
+    for param in ["bantime", "maxretry", "findtime"]:
+        r = subprocess.run(
+            ["sudo", "fail2ban-client", "get", "sshd", param],
+            capture_output=True, text=True, timeout=5
+        )
+        try:
+            result[param] = int(r.stdout.strip())
+        except Exception:
+            result[param] = None
+    return jsonify({"ok": True, **result})
+
+@app.route("/fail2ban/apply", methods=["POST"])
+@require_key
+def fail2ban_apply():
+    """Applique les paramètres Fail2Ban stockés dans soc_config.json."""
+    cfg = load_soc_config()
+    bantime  = int(cfg.get("f2b_bantime",  3600))
+    maxretry = int(cfg.get("f2b_maxretry", 5))
+    findtime = int(cfg.get("f2b_findtime", 600))
+    results = {}
+    for param, val in [("bantime", bantime), ("maxretry", maxretry), ("findtime", findtime)]:
+        r = subprocess.run(
+            ["sudo", "fail2ban-client", "set", "sshd", param, str(val)],
+            capture_output=True, text=True, timeout=10
+        )
+        results[param] = r.returncode == 0
+    ok = all(results.values())
+    print(f"[Actions] FAIL2BAN APPLY bantime={bantime}s maxretry={maxretry} findtime={findtime}s → {results}")
+    return jsonify({"ok": ok, "results": results, "bantime": bantime, "maxretry": maxretry, "findtime": findtime})
+
+@app.route("/maintenance/purge", methods=["POST"])
+@require_key
+def maintenance_purge():
+    """Supprime les fichiers PNG de rapports de plus de 30 jours."""
+    cutoff = time.time() - 30 * 86400
+    deleted, freed = 0, 0
+    if os.path.exists(IMGDIR_REPORTS):
+        for fname in os.listdir(IMGDIR_REPORTS):
+            if not fname.endswith(".png"):
+                continue
+            fpath = os.path.join(IMGDIR_REPORTS, fname)
+            try:
+                if os.path.getmtime(fpath) < cutoff:
+                    freed += os.path.getsize(fpath)
+                    os.remove(fpath)
+                    deleted += 1
+            except Exception:
+                pass
+    print(f"[Actions] PURGE → {deleted} PNG supprimés, {freed // 1024} KB libérés")
+    return jsonify({"ok": True, "deleted": deleted, "freed_kb": freed // 1024})
+
+@app.route("/maintenance/clear-geo", methods=["POST"])
+@require_key
+def maintenance_clear_geo():
+    """Vide le cache de géolocalisation des IPs."""
+    try:
+        if os.path.exists(GEO_CACHE_FILE):
+            os.remove(GEO_CACHE_FILE)
+        return jsonify({"ok": True, "message": "Cache géo supprimé"})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 

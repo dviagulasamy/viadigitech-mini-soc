@@ -767,17 +767,12 @@ def build_html():
     if ACTIONS_KEY:
         actions_js = f"""
 function getKey(){{
-  let k=sessionStorage.getItem('soc_api_key');
-  if(!k){{
-    showPromptModal('Clé API SOC','Entrez votre clé API...',v=>{{sessionStorage.setItem('soc_api_key',v);}});
-    return null;
-  }}
-  return k;
+  return localStorage.getItem('soc_api_key')||sessionStorage.getItem('soc_api_key')||'';
 }}
 async function apiCall(ep,data,btn){{
-  let key=sessionStorage.getItem('soc_api_key');
+  let key=localStorage.getItem('soc_api_key')||sessionStorage.getItem('soc_api_key');
   if(!key){{
-    showPromptModal('Clé API SOC','Entrez votre clé API...',async v=>{{
+    showPromptModal('Clé API SOC','Entrez votre clé API (ou mémorisez-la dans les Paramètres)...',async v=>{{
       sessionStorage.setItem('soc_api_key',v);
       await apiCall(ep,data,btn);
     }});
@@ -787,7 +782,11 @@ async function apiCall(ep,data,btn){{
   try{{
     const res=await fetch('{ACTIONS_API}'+ep,{{method:'POST',headers:{{'Content-Type':'application/json','X-SOC-Key':key}},body:JSON.stringify(data)}});
     const r=await res.json();
-    if(res.status===401||res.status===403){{sessionStorage.removeItem('soc_api_key');showToast('Clé invalide — réessayez',false);return null;}}
+    if(res.status===401||res.status===403){{
+      sessionStorage.removeItem('soc_api_key');
+      showToast('Clé invalide — vérifiez dans les Paramètres',false);
+      return null;
+    }}
     return r;
   }}catch(e){{showToast('Erreur réseau : '+e.message,false);return null;}}
   finally{{if(btn){{btn.innerHTML=btn.dataset.orig;btn.disabled=false;}}}}
@@ -1141,9 +1140,13 @@ tr:last-child td{{border-bottom:none}}
       <div><div class="settings-label">Astreinte</div><div class="settings-sub">Statut affiché dans la topbar</div></div>
       <label class="toggle"><input type="checkbox" id="cfg-oncall" onchange="saveSettingsLive()"><span class="toggle-slider"></span></label>
     </div>
-    <div class="settings-row">
-      <div class="settings-label">Clé API</div>
-      <button onclick="resetApiKey()" style="background:#1e2942;border:1px solid var(--border2);color:var(--muted);padding:5px 10px;border-radius:7px;font-size:11px;cursor:pointer">🔄 Reset</button>
+    <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+      <div><div class="settings-label">Clé API SOC</div><div class="settings-sub">Mémorisée dans le navigateur (localStorage)</div></div>
+      <div style="display:flex;gap:6px;width:100%">
+        <input class="settings-input" id="cfg-api-key" type="password" placeholder="Entrer la clé..." style="width:100%;flex:1;text-align:left">
+        <button onclick="saveApiKey()" style="background:#1e1b4b;border:1px solid #4338ca;color:#a5b4fc;padding:5px 10px;border-radius:7px;font-size:11px;cursor:pointer;white-space:nowrap">💾 Mémoriser</button>
+        <button onclick="resetApiKey()" style="background:#1e2942;border:1px solid var(--border2);color:var(--muted);padding:5px 10px;border-radius:7px;font-size:11px;cursor:pointer">✕</button>
+      </div>
     </div>
   </div>
   <div class="settings-section">
@@ -1205,6 +1208,44 @@ tr:last-child td{{border-bottom:none}}
     <div class="settings-row">
       <div><div class="settings-label">Auto-logout</div><div class="settings-sub">Minutes d'inactivité (0 = désactivé)</div></div>
       <input class="settings-input" id="cfg-autologout" type="number" min="0" max="480" value="0" onchange="applyAutologout()">
+    </div>
+  </div>
+  <div class="settings-section">
+    <div class="settings-section-title">Fail2Ban — Jail sshd</div>
+    <div class="settings-row">
+      <div><div class="settings-label">Durée de ban</div><div class="settings-sub">Secondes (3600 = 1h, 86400 = 24h)</div></div>
+      <input class="settings-input" id="cfg-f2b-bantime" type="number" min="60" max="604800" value="3600">
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-label">Max retry</div><div class="settings-sub">Tentatives avant ban</div></div>
+      <input class="settings-input" id="cfg-f2b-maxretry" type="number" min="1" max="20" value="5">
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-label">Find time</div><div class="settings-sub">Fenêtre d'analyse (secondes)</div></div>
+      <input class="settings-input" id="cfg-f2b-findtime" type="number" min="60" max="3600" value="600">
+    </div>
+    <button onclick="applyFail2Ban(this)" style="width:100%;background:#0d2318;border:1px solid #166534;color:#4ade80;padding:8px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;margin-top:4px">⚡ Appliquer à Fail2Ban</button>
+  </div>
+  <div class="settings-section">
+    <div class="settings-section-title">Ban de bloc /24 auto</div>
+    <div class="settings-row">
+      <div><div class="settings-label">Activer</div><div class="settings-sub">Ban le /24 si ≥ N IPs distinctes en 1h</div></div>
+      <label class="toggle"><input type="checkbox" id="cfg-subnet-ban"><span class="toggle-slider"></span></label>
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-label">Seuil (IPs min)</div><div class="settings-sub">Déclenche le ban du bloc</div></div>
+      <input class="settings-input" id="cfg-subnet-threshold" type="number" min="2" max="10" value="3">
+    </div>
+  </div>
+  <div class="settings-section">
+    <div class="settings-section-title">Maintenance</div>
+    <div class="settings-row">
+      <div><div class="settings-label">Purge graphiques PNG</div><div class="settings-sub">Supprime les fichiers &gt; 30j</div></div>
+      <button onclick="purgeFiles(this)" style="background:#1a0505;border:1px solid #7f1d1d;color:#fca5a5;padding:5px 10px;border-radius:7px;font-size:11px;cursor:pointer">🗑️ Purger</button>
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-label">Cache géolocalisation</div><div class="settings-sub">Force la remise à jour des IPs</div></div>
+      <button onclick="clearGeoCache(this)" style="background:#1a1008;border:1px solid #78350f;color:#fde68a;padding:5px 10px;border-radius:7px;font-size:11px;cursor:pointer">🗺️ Vider</button>
     </div>
   </div>
   <button class="settings-save-btn" onclick="saveSettings()">💾 Sauvegarder</button>
@@ -1686,6 +1727,13 @@ function closeSettings(){{
   document.getElementById('settings-overlay').classList.remove('open');
 }}
 async function loadSettingsFromServer(){{
+  // Clé API depuis localStorage
+  const storedKey=localStorage.getItem('soc_api_key');
+  if(storedKey){{
+    const kInput=document.getElementById('cfg-api-key');
+    if(kInput)kInput.value=storedKey;
+    sessionStorage.setItem('soc_api_key',storedKey);
+  }}
   try{{
     const r=await fetch('/action/config');
     const cfg=await r.json();
@@ -1702,12 +1750,17 @@ async function loadSettingsFromServer(){{
     if(el('cfg-notif-level'))el('cfg-notif-level').value=cfg.notif_level||'all';
     if(el('cfg-autologout'))el('cfg-autologout').value=cfg.autologout||0;
     if(el('cfg-theme'))el('cfg-theme').checked=document.body.classList.contains('theme-light');
+    if(el('cfg-f2b-bantime'))el('cfg-f2b-bantime').value=cfg.f2b_bantime||3600;
+    if(el('cfg-f2b-maxretry'))el('cfg-f2b-maxretry').value=cfg.f2b_maxretry||5;
+    if(el('cfg-f2b-findtime'))el('cfg-f2b-findtime').value=cfg.f2b_findtime||600;
+    if(el('cfg-subnet-ban'))el('cfg-subnet-ban').checked=!!cfg.subnet_ban_enabled;
+    if(el('cfg-subnet-threshold'))el('cfg-subnet-threshold').value=cfg.subnet_ban_threshold||3;
     updateOncallBadge(!!cfg.oncall);
     applyAutologout();
   }}catch(e){{}}
 }}
 async function saveSettings(){{
-  const key=sessionStorage.getItem('soc_api_key')||'';
+  const key=localStorage.getItem('soc_api_key')||sessionStorage.getItem('soc_api_key')||'';
   const el=id=>document.getElementById(id);
   const payload={{
     oncall:el('cfg-oncall')?.checked||false,
@@ -1720,7 +1773,12 @@ async function saveSettings(){{
     warn_ram:parseInt(el('cfg-warn-ram')?.value||75),
     crit_ram:parseInt(el('cfg-crit-ram')?.value||90),
     notif_level:el('cfg-notif-level')?.value||'all',
-    autologout:parseInt(el('cfg-autologout')?.value||0)
+    autologout:parseInt(el('cfg-autologout')?.value||0),
+    f2b_bantime:parseInt(el('cfg-f2b-bantime')?.value||3600),
+    f2b_maxretry:parseInt(el('cfg-f2b-maxretry')?.value||5),
+    f2b_findtime:parseInt(el('cfg-f2b-findtime')?.value||600),
+    subnet_ban_enabled:el('cfg-subnet-ban')?.checked||false,
+    subnet_ban_threshold:parseInt(el('cfg-subnet-threshold')?.value||3)
   }};
   try{{
     const r=await fetch('/action/config',{{method:'POST',headers:{{'Content-Type':'application/json','X-SOC-Key':key}},body:JSON.stringify(payload)}});
@@ -1747,12 +1805,42 @@ function applyThemeFromSettings(){{
   const btn=document.getElementById('theme-toggle');
   if(btn)btn.textContent=light?'☀️':'🌙';
 }}
+function saveApiKey(){{
+  const key=document.getElementById('cfg-api-key')?.value.trim();
+  if(!key){{showToast('Clé vide',false);return;}}
+  localStorage.setItem('soc_api_key',key);
+  sessionStorage.setItem('soc_api_key',key);
+  showToast('✓ Clé API mémorisée — plus de prompt',true);
+}}
 function resetApiKey(){{
+  localStorage.removeItem('soc_api_key');
   sessionStorage.removeItem('soc_auth');
   sessionStorage.removeItem('soc_api_key');
+  const kInput=document.getElementById('cfg-api-key');
+  if(kInput)kInput.value='';
   closeSettings();
   document.getElementById('login-overlay').classList.add('open');
   setTimeout(()=>document.getElementById('login-key')?.focus(),100);
+}}
+async function applyFail2Ban(btn){{
+  const el=id=>document.getElementById(id);
+  const payload={{
+    f2b_bantime:parseInt(el('cfg-f2b-bantime')?.value||3600),
+    f2b_maxretry:parseInt(el('cfg-f2b-maxretry')?.value||5),
+    f2b_findtime:parseInt(el('cfg-f2b-findtime')?.value||600),
+  }};
+  const r1=await apiCall('/config',payload,null);
+  if(!r1||!r1.ok){{showToast('Erreur sauvegarde config',false);return;}}
+  const r2=await apiCall('/fail2ban/apply',{{}},btn);
+  if(r2)showToast(r2.ok?`✓ Fail2Ban mis à jour — ban ${{payload.f2b_bantime}}s / retry ${{payload.f2b_maxretry}} / window ${{payload.f2b_findtime}}s`:`Erreur: ${{JSON.stringify(r2.results)}}`,r2.ok);
+}}
+async function purgeFiles(btn){{
+  const r=await apiCall('/maintenance/purge',{{}},btn);
+  if(r)showToast(r.ok?`✓ ${{r.deleted}} PNG supprimés — ${{r.freed_kb}} KB libérés`:`Erreur: ${{r.error}}`,r.ok);
+}}
+async function clearGeoCache(btn){{
+  const r=await apiCall('/maintenance/clear-geo',{{}},btn);
+  if(r)showToast(r.ok?'✓ Cache géo vidé — rechargement au prochain cycle':r.error,r.ok);
 }}
 (function(){{loadSettingsFromServer();}})();
 
