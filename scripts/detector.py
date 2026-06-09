@@ -14,6 +14,7 @@ import psutil
 import requests
 from datetime import datetime, timedelta
 from collections import Counter, defaultdict
+import csv
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -621,6 +622,7 @@ def main():
         print(f"[{now:%H:%M:%S}] Aucune alerte. CPU:{sys_metrics['cpu']:.1f}% RAM:{sys_metrics['ram']:.1f}% Disk:{sys_metrics['disk']:.1f}% SSH:{ssh_fails} Bans:{len(new_bans)}")
 
     check_subnet_auto_ban()
+    check_low_slow()
 
 def check_subnet_auto_ban():
     """Ban automatique d'un /24 si ≥ N IPs distinctes bannies dans la dernière heure."""
@@ -683,6 +685,62 @@ def check_subnet_auto_ban():
                 print(f"[BanSubnet] {subnet} → échec: {result.stderr.strip()}")
         except Exception as e:
             print(f"[BanSubnet] Erreur pour {subnet}: {e}")
+
+def check_low_slow():
+    """Détecte les attaques SSH étalées sur 24h sous le radar Fail2Ban (10-200 tentatives)."""
+    LOW_SLOW_MIN   = 10
+    LOW_SLOW_MAX   = 200
+    DEDUP_MIN      = 360   # 6h entre deux alertes pour la même IP
+
+    _, ips_24h = get_ssh_fails(24 * 60)
+    if not ips_24h:
+        return
+
+    try:
+        banned_out = subprocess.run(
+            ["sudo", "fail2ban-client", "status", "sshd"],
+            capture_output=True, text=True, timeout=5
+        ).stdout
+        banned_now = set()
+        for line in banned_out.splitlines():
+            if "Banned IP list" in line:
+                banned_now = set(line.split(":")[-1].split())
+                break
+    except Exception:
+        banned_now = set()
+
+    suspects = []
+    for ip, count in ips_24h.items():
+        if count < LOW_SLOW_MIN or count > LOW_SLOW_MAX:
+            continue
+        if ip in WHITELIST or ip in banned_now:
+            continue
+        key = f"lowslow_{ip}"
+        if already_alerted(key, minutes=DEDUP_MIN):
+            continue
+        mark_alerted(key)
+        suspects.append({"ip": ip, "count": count})
+
+    if not suspects:
+        return
+
+    now = datetime.now()
+    print(f"[{now:%H:%M:%S}] Low&Slow: {len(suspects)} IP(s) suspectes sur 24h")
+
+    for s in suspects:
+        write_audit(s["ip"], "LOW_SLOW", 30,
+                    f"Low&Slow: {s['count']} tentatives SSH en 24h sous le radar Fail2Ban")
+
+    top3 = sorted(suspects, key=lambda x: x["count"], reverse=True)[:3]
+    lines = "\n".join(f"• <code>{s['ip']}</code> — {s['count']} tentatives" for s in top3)
+    hostname = os.uname().nodename
+    send_telegram(
+        f"🐢 <b>ATTAQUE LOW&SLOW</b>\n"
+        f"{len(suspects)} IP(s) sous le radar Fail2Ban (24h)\n"
+        f"{lines}\n"
+        f"Serveur: {hostname}"
+    )
+
 
 if __name__ == "__main__":
     main()

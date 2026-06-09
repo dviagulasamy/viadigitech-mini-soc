@@ -744,23 +744,43 @@ def build_html():
         whitelist_html += f"<tr><td style='font-family:monospace;font-size:12px'>{ip}</td><td style='text-align:right'>{rm_btn}</td></tr>"
 
     # ── Timeline HTML ──
-    timeline_html = ""
+    # ── Timeline verticale — marqueurs colorés avec ligne connectrice ──
+    CRITICAL_TYPES = {"BAN_AUTO", "BAN_OLLAMA", "BAN_SUBNET24", "HONEYPOT_HIT"}
+    timeline_items = []
     prev_day = None
     for ev in timeline:
         day = ev["ts"].strftime("%d/%m/%Y")
         if day != prev_day:
-            timeline_html += f"<div style='font-size:11px;color:#334155;font-weight:600;padding:12px 0 6px;border-top:1px solid #1e2942;margin-top:4px'>{day}</div>"
+            timeline_items.append(
+                f"""<div style="display:flex;align-items:center;gap:10px;padding:14px 0 6px 0;margin-left:8px">
+                  <div style="width:1px;height:12px;background:#1e2942;margin-left:9px;margin-right:0;flex-shrink:0"></div>
+                  <span style="font-size:10px;font-weight:700;color:#334155;letter-spacing:1.2px;text-transform:uppercase;margin-left:8px">{day}</span>
+                </div>"""
+            )
             prev_day = day
-        timeline_html += f"""<div style="display:flex;gap:12px;align-items:flex-start;padding:8px 0;border-bottom:1px solid #0d1117">
-          <div style="min-width:38px;font-size:11px;color:#475569;padding-top:2px">{ev['label']}</div>
-          <div style="font-size:16px;line-height:1">{ev['icon']}</div>
-          <div>
-            <div style="font-size:12px;font-weight:600;color:{ev['color']}">{ev['title']}</div>
-            {'<div style="font-size:11px;color:#475569;margin-top:1px">' + ev['detail'] + '</div>' if ev['detail'] else ''}
-          </div>
-        </div>"""
-    if not timeline_html:
-        timeline_html = "<div style='color:#475569;font-size:13px;padding:20px 0;text-align:center'>Aucun événement sur les 24 dernières heures</div>"
+        is_crit = any(t in ev.get("title", "") + ev.get("detail", "") for t in CRITICAL_TYPES) or ev["color"] in ("#ef4444", "#f97316")
+        dot_size = "14px" if is_crit else "10px"
+        glow = f"box-shadow:0 0 8px {ev['color']}88" if is_crit else ""
+        timeline_items.append(
+            f"""<div style="display:flex;gap:0;align-items:flex-start;position:relative">
+              <!-- Ligne verticale connectrice -->
+              <div style="display:flex;flex-direction:column;align-items:center;width:20px;flex-shrink:0;margin-right:12px">
+                <div style="width:{dot_size};height:{dot_size};border-radius:50%;background:{ev['color']};flex-shrink:0;margin-top:3px;{glow}"></div>
+                <div style="width:2px;flex:1;min-height:24px;background:linear-gradient({ev['color']}44,transparent)"></div>
+              </div>
+              <!-- Contenu -->
+              <div style="padding:2px 0 18px 0;flex:1">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
+                  <span style="font-size:10px;font-family:'JetBrains Mono',ui-monospace,monospace;color:#475569;letter-spacing:.3px">{ev['label']}</span>
+                  <span style="font-size:14px;line-height:1">{ev['icon']}</span>
+                </div>
+                <div style="font-size:13px;font-weight:600;color:{ev['color']};{'text-shadow:0 0 12px '+ev['color']+'66' if is_crit else ''}">{ev['title']}</div>
+                {'<div style="font-size:11px;color:#64748b;margin-top:3px">' + ev['detail'] + '</div>' if ev['detail'] else ''}
+              </div>
+            </div>"""
+        )
+    timeline_html = "\n".join(timeline_items) if timeline_items else \
+        "<div style='color:#475569;font-size:13px;padding:20px 0;text-align:center'>Aucun événement sur les 24 dernières heures</div>"
 
     # ── Heatmap données JS ──
     heatmap_js = json.dumps(heatmap)
@@ -1062,18 +1082,34 @@ tr:last-child td{{border-bottom:none}}
   .topbar-brand span{{display:none}}
   .threat-badge{{font-size:10px;padding:4px 8px}}
 }}
-/* ── Login overlay ── */
-.login-overlay{{display:none;position:fixed;inset:0;background:var(--bg);z-index:9000;flex-direction:column;align-items:center;justify-content:center}}
+/* ── Login overlay premium ── */
+.login-overlay{{display:none;position:fixed;inset:0;z-index:9000;flex-direction:column;align-items:center;justify-content:center;background:#020510;overflow:hidden}}
 .login-overlay.open{{display:flex}}
-.login-box{{background:var(--bg2);border:1px solid var(--border2);border-radius:20px;padding:40px 48px;width:100%;max-width:380px;text-align:center;box-shadow:0 32px 80px rgba(0,0,0,.8)}}
-.login-logo{{font-size:32px;margin-bottom:8px}}
-.login-title{{font-size:20px;font-weight:800;color:var(--text);margin-bottom:4px}}
-.login-sub{{font-size:12px;color:var(--muted);margin-bottom:28px}}
-.login-input{{width:100%;background:var(--bg);border:1px solid var(--border2);color:var(--text);padding:12px 16px;border-radius:10px;font-size:14px;outline:none;margin-bottom:16px;transition:border-color .18s;box-sizing:border-box}}
-.login-input:focus{{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.15)}}
-.login-btn{{width:100%;background:var(--accent);border:none;color:#fff;padding:12px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s}}
-.login-btn:hover{{background:#4f46e5}}
-.login-error{{font-size:12px;color:var(--red);margin-top:10px;min-height:18px}}
+/* Orbes animées en arrière-plan */
+.login-overlay::before{{content:'';position:absolute;inset:0;background:
+  radial-gradient(ellipse 60% 50% at 20% 30%,rgba(99,102,241,.18) 0%,transparent 60%),
+  radial-gradient(ellipse 50% 40% at 80% 70%,rgba(16,185,129,.12) 0%,transparent 55%),
+  radial-gradient(ellipse 40% 60% at 60% 10%,rgba(239,68,68,.08) 0%,transparent 50%);
+  animation:orbFloat 12s ease-in-out infinite alternate;pointer-events:none}}
+.login-overlay::after{{content:'';position:absolute;inset:0;background-image:
+  radial-gradient(circle,rgba(99,102,241,.06) 1px,transparent 1px);
+  background-size:28px 28px;pointer-events:none;opacity:.5}}
+@keyframes orbFloat{{0%{{transform:scale(1) rotate(0deg)}}50%{{transform:scale(1.08) rotate(2deg)}}100%{{transform:scale(.96) rotate(-1deg)}}}}
+/* Carte glassmorphism */
+.login-box{{position:relative;background:rgba(13,17,23,.75);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);border:1px solid rgba(99,102,241,.25);border-radius:24px;padding:44px 52px;width:100%;max-width:400px;text-align:center;box-shadow:0 0 0 1px rgba(255,255,255,.04),0 40px 80px rgba(0,0,0,.9),0 0 60px rgba(99,102,241,.08);animation:loginBoxIn .45s cubic-bezier(.16,.84,.44,1)}}
+@keyframes loginBoxIn{{from{{opacity:0;transform:translateY(24px) scale(.97)}}to{{opacity:1;transform:translateY(0) scale(1)}}}}
+/* Shield SVG animé */
+.login-shield{{margin:0 auto 16px;width:56px;height:56px;animation:shieldPulse 2.8s ease-in-out infinite}}
+@keyframes shieldPulse{{0%,100%{{filter:drop-shadow(0 0 6px rgba(99,102,241,.4))}}50%{{filter:drop-shadow(0 0 18px rgba(99,102,241,.8))}}}}
+.login-title{{font-size:22px;font-weight:800;color:#f1f5f9;margin-bottom:4px;letter-spacing:-.3px}}
+.login-sub{{font-size:12px;color:#475569;margin-bottom:32px;letter-spacing:.3px}}
+.login-input{{width:100%;background:rgba(255,255,255,.04);border:1px solid rgba(99,102,241,.2);color:#f1f5f9;padding:13px 16px;border-radius:12px;font-size:14px;outline:none;margin-bottom:14px;transition:border-color .18s,box-shadow .18s,background .18s;box-sizing:border-box;letter-spacing:.5px}}
+.login-input:focus{{border-color:rgba(99,102,241,.6);box-shadow:0 0 0 3px rgba(99,102,241,.12),0 0 20px rgba(99,102,241,.08);background:rgba(255,255,255,.06)}}
+.login-input::placeholder{{color:#334155}}
+.login-btn{{width:100%;background:linear-gradient(135deg,#6366f1,#4f46e5);border:none;color:#fff;padding:13px;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;transition:opacity .15s,transform .12s;letter-spacing:.3px;box-shadow:0 4px 20px rgba(99,102,241,.4)}}
+.login-btn:hover{{opacity:.92;transform:translateY(-1px)}}
+.login-btn:active{{transform:translateY(0)}}
+.login-error{{font-size:12px;color:#ef4444;margin-top:12px;min-height:18px}}
 @keyframes loginShake{{0%,100%{{transform:translateX(0)}}25%{{transform:translateX(-8px)}}75%{{transform:translateX(8px)}}}}
 .login-box.shake{{animation:loginShake .3s ease}}
 /* ── Settings panel ── */
@@ -1120,9 +1156,13 @@ tr:last-child td{{border-bottom:none}}
 .empty-state{{display:flex;flex-direction:column;align-items:center;padding:32px 16px;color:#475569;gap:10px}}
 .empty-state svg{{width:36px;height:36px;stroke:#334155;fill:none;stroke-width:1.5}}
 .empty-state p{{font-size:13px}}
-/* ── Threat hero ── */
-.threat-hero{{border-radius:14px;padding:20px 24px;display:flex;align-items:center;gap:20px;border:1px solid}}
-.threat-hero-score{{font-size:52px;font-weight:700;line-height:1;letter-spacing:-2px;font-family:'JetBrains Mono',ui-monospace,monospace}}
+/* ── Threat hero gauge SVG ── */
+.threat-hero{{border-radius:14px;padding:20px 16px;display:flex;flex-direction:column;align-items:center;gap:0;border:1px solid;position:relative;overflow:hidden}}
+.threat-hero::before{{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 120%,var(--tg-glow,rgba(34,197,94,.08)) 0%,transparent 70%);pointer-events:none}}
+.threat-gauge-wrap{{position:relative;width:180px;height:108px;margin:4px auto 0}}
+.threat-gauge-label{{position:absolute;bottom:0;left:50%;transform:translateX(-50%);text-align:center;line-height:1.1}}
+.threat-gauge-score{{font-size:38px;font-weight:700;letter-spacing:-2px;font-family:'JetBrains Mono',ui-monospace,monospace;display:block}}
+.threat-gauge-unit{{font-size:13px;opacity:.5;display:block}}
 .threat-hero-bar{{height:6px;border-radius:3px;background:#1e2942;margin-top:10px;overflow:hidden}}
 .threat-hero-fill{{height:6px;border-radius:3px;transition:width .8s ease}}
 /* ── JetBrains Mono override pour éléments monospace ── */
@@ -1162,11 +1202,15 @@ tr:last-child td{{border-bottom:none}}
 <!-- ═══ LOGIN ═══ -->
 <div class="login-overlay open" id="login-overlay">
   <div class="login-box" id="login-box">
-    <div class="login-logo">🛡️</div>
+    <!-- Shield SVG animé -->
+    <svg class="login-shield" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M28 4L8 12v16c0 11.05 8.5 21.38 20 24 11.5-2.62 20-12.95 20-24V12L28 4z" fill="rgba(99,102,241,.15)" stroke="rgba(99,102,241,.7)" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M20 28l5.5 5.5 10.5-11" stroke="#6366f1" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
     <div class="login-title">ViaDigiTech SOC</div>
-    <div class="login-sub">Authentification requise</div>
-    <input class="login-input" id="login-key" type="password" placeholder="Clé API SOC..." autocomplete="off">
-    <button class="login-btn" onclick="doLogin()">Connexion</button>
+    <div class="login-sub">SECURITY OPERATIONS CENTER</div>
+    <input class="login-input" id="login-key" type="password" placeholder="Clé d'accès SOC..." autocomplete="off">
+    <button class="login-btn" onclick="doLogin()">Accéder au SOC</button>
     <div class="login-error" id="login-error"></div>
   </div>
 </div>
@@ -1405,14 +1449,28 @@ tr:last-child td{{border-bottom:none}}
 
   <!-- Hero : Threat Score + Stats -->
   <div class="grid g2" style="margin-bottom:14px;grid-template-columns:280px 1fr">
-    <!-- Threat Score Hero -->
-    <div class="threat-hero card" style="background:{threat_bg};border-color:{threat_color};flex-direction:column;align-items:flex-start;gap:6px">
-      <div style="font-size:11px;font-weight:700;color:{threat_color};letter-spacing:1.2px;text-transform:uppercase">Score de menace</div>
-      <div class="threat-hero-score" style="color:{threat_color}">{threat}<span style="font-size:18px;font-weight:400;opacity:.6">/100</span></div>
-      <div style="font-size:13px;font-weight:600;color:{threat_color}">{threat_label}</div>
-      <div class="threat-hero-bar" style="width:100%">
-        <div class="threat-hero-fill" style="width:{threat}%;background:{threat_color}"></div>
+    <!-- Threat Score Hero — Jauge SVG radiale 270° -->
+    <div class="threat-hero card" id="threat-hero-card" style="background:{threat_bg};border-color:{threat_color};--tg-glow:{threat_color}22">
+      <div style="font-size:10px;font-weight:700;color:{threat_color};letter-spacing:1.4px;text-transform:uppercase;opacity:.8;margin-bottom:2px">Score de menace</div>
+      <div class="threat-gauge-wrap">
+        <svg viewBox="0 0 180 108" width="180" height="108" style="overflow:visible">
+          <!-- Arc de fond (270° = 3/4 cercle, rayon 78, cx=90, cy=90) -->
+          <!-- circumference = 2*pi*78 ≈ 490.09 ; 270° = 490.09*0.75 = 367.57 -->
+          <circle cx="90" cy="90" r="78" fill="none" stroke="#1e2942" stroke-width="12"
+            stroke-dasharray="367.57 490.09" stroke-dashoffset="-61.26"
+            stroke-linecap="round" transform="rotate(135 90 90)"/>
+          <!-- Arc de valeur animé via JS -->
+          <circle cx="90" cy="90" r="78" fill="none" id="gauge-arc" stroke="{threat_color}" stroke-width="12"
+            stroke-dasharray="0 490.09" stroke-dashoffset="-61.26"
+            stroke-linecap="round" transform="rotate(135 90 90)"
+            style="transition:stroke-dasharray 1.2s cubic-bezier(.16,.84,.44,1),stroke .6s ease;filter:drop-shadow(0 0 8px {threat_color}88)"/>
+        </svg>
+        <div class="threat-gauge-label">
+          <span class="threat-gauge-score" id="gauge-score" style="color:{threat_color}">0</span>
+          <span class="threat-gauge-unit" style="color:{threat_color}">/100</span>
+        </div>
       </div>
+      <div style="font-size:12px;font-weight:700;color:{threat_color};letter-spacing:.8px;margin-top:6px">{threat_label}</div>
     </div>
     <!-- Stat cards 2×3 -->
     <div class="grid g3">
@@ -1911,7 +1969,7 @@ async function testTelegram(btn){{
   const r=await apiCall('/notify/telegram',{{message:'🛡️ <b>ViaDigiTech SOC</b> — Test de notification Telegram ✓\\nConfiguration opérationnelle.'}},btn);
   if(r)showToast(r.ok?'✓ Message Telegram envoyé !':'Erreur: '+(r.error||'inconnue'),r.ok);
 }}
-(function(){{loadSettingsFromServer();setTimeout(animateCounters,200);}})();
+(function(){{loadSettingsFromServer();setTimeout(animateCounters,200);setTimeout(animateGauge,300);}})();
 
 // ── Status bar ──
 function setDot(id,ok){{
@@ -1953,6 +2011,28 @@ function animateCounters(){{
   animateCounter(document.getElementById('live-bans-today'),{bans_today},'');
 }}
 
+// ── Jauge SVG radiale 270° ──
+function animateGauge(){{
+  const arc=document.getElementById('gauge-arc');
+  const scoreEl=document.getElementById('gauge-score');
+  if(!arc||!scoreEl)return;
+  const target={threat};
+  const maxArc=367.57;  // 270° de la circonférence totale 490.09
+  const dur=1200;
+  function ease(t){{return t<.5?4*t*t*t:(t-1)*(2*t-2)*(2*t-2)+1;}}
+  let startTs=null;
+  function step(ts){{
+    if(!startTs)startTs=ts;
+    const p=Math.min((ts-startTs)/dur,1);
+    const ep=ease(p);
+    const filled=maxArc*ep*(target/100);
+    arc.setAttribute('stroke-dasharray',filled+' 490.09');
+    scoreEl.textContent=Math.round(ep*target);
+    if(p<1)requestAnimationFrame(step);
+  }}
+  requestAnimationFrame(step);
+}}
+
 // ── Navigation ──
 function showScreen(id){{
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
@@ -1964,7 +2044,7 @@ function showScreen(id){{
   const ddi=document.getElementById('dnav-'+id); if(ddi)ddi.classList.add('active');
   if(id==='security'&&window._leafletMap) setTimeout(()=>window._leafletMap.invalidateSize(),50);
   if(id==='performance') setTimeout(()=>window.dispatchEvent(new Event('resize')),50);
-  if(id==='overview') setTimeout(animateCounters,50);
+  if(id==='overview'){{setTimeout(animateCounters,50);setTimeout(animateGauge,80);}}
   sessionStorage.setItem('soc_screen',id);
 }}
 (function(){{const s=sessionStorage.getItem('soc_screen');if(s)showScreen(s);}})();
