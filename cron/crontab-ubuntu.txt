@@ -1,14 +1,20 @@
 # ─── ViaDigiTech SOC ───────────────────────────────────────────
-# Variables d'environnement (remplacer les valeurs)
-SOC_MAIL_TO=admin@yourdomain.com
+# Variables d'environnement (doivent être AVANT les jobs)
+ABUSEIPDB_KEY=your_abuseipdb_key_here
+ANYTHINGLLM_KEY=your_anythingllm_key_here
+SOC_ACTIONS_KEY=your_soc_actions_key_here
+SOC_DASHBOARD_PWD=your_dashboard_password_here
 SOC_MAIL_FROM=secops@yourdomain.com
-ABUSEIPDB_KEY=YOUR_ABUSEIPDB_KEY
-ANYTHINGLLM_KEY=YOUR_ANYTHINGLLM_KEY
-SOC_ACTIONS_KEY=YOUR_RANDOM_HEX_KEY  # générer avec : openssl rand -hex 24
+SOC_MAIL_TO=admin@yourdomain.com
 
 # m h  dom mon dow   command
-#0 7 * * * bash /home/ubuntu/viadigitech-soc-v5-3/viadigitech-monitoring-v5-enterprise-ai.sh   # désactivé (doublon)
-0 7 * * * python3 /home/ubuntu/secops/report.py >> /home/ubuntu/secops/report.log 2>&1
+#0 7 * * * bash /home/ubuntu/viadigitech-soc-v5-3/viadigitech-monitoring-v5-enterprise-ai.sh
+#0 7 * * * bash /home/ubuntu/viadigitech-soc-v5/viadigitech-monitoring-v5-enterprise-ai.sh
 0 7 * * * python3 /home/ubuntu/secops/rag_ingest.py >> /home/ubuntu/secops/rag_ingest.log 2>&1
-*/15 * * * * python3 /home/ubuntu/secops/detector.py >> /home/ubuntu/secops/detector.log 2>&1
+0 7 * * * python3 /home/ubuntu/secops/report.py >> /home/ubuntu/secops/report.log 2>&1
 */15 * * * * python3 /home/ubuntu/secops/dashboard.py >> /home/ubuntu/secops/dashboard.log 2>&1
+*/15 * * * * python3 /home/ubuntu/secops/detector.py >> /home/ubuntu/secops/detector.log 2>&1
+0 8 * * 5    python3 /home/ubuntu/secops/report_weekly.py >> /home/ubuntu/secops/report_weekly.log 2>&1
+0 7 1 * *    python3 /home/ubuntu/secops/report_monthly.py >> /home/ubuntu/secops/report_monthly.log 2>&1
+*/30 * * * * python3 /home/ubuntu/secops/soc_healthcheck.py >> /home/ubuntu/secops/healthcheck.log 2>&1
+0 7 * * 1    python3 /home/ubuntu/secops/predict_ai.py >> /home/ubuntu/secops/predict_ai.log 2>&1

@@ -1,0 +1,16 @@
+[Unit]
+Description=ViaDigiTech SOC — Honeypot SSH port 2222
+After=network.target fail2ban.service
+
+[Service]
+Type=simple
+User=ubuntu
+EnvironmentFile=-/etc/soc-actions.env
+ExecStart=/usr/bin/python3 /home/ubuntu/secops/honeypot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
