@@ -431,6 +431,16 @@ def get_subnet_correlation(ssh_fails):
     )
     return result[:10]
 
+def get_soc_health():
+    path = "/home/ubuntu/secops/soc_health.json"
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
 def get_whitelist():
     """Retourne la liste des IPs ignorées par Fail2Ban."""
     out = run("sudo fail2ban-client get sshd ignoreip 2>/dev/null")
@@ -511,6 +521,36 @@ def build_html():
     subnets    = get_subnet_correlation(ssh_fails)
     whitelist  = get_whitelist()
     threat     = compute_threat_score(metrics, ssh_total, bans_today, ban_count)
+
+    # ── Health badge SOC ──
+    soc_health = get_soc_health()
+    if soc_health:
+        _h_overall = soc_health.get("overall", "?")
+        _h_ts      = soc_health.get("ts", "")
+        _h_checks  = soc_health.get("checks", {})
+        _h_ko      = [k for k, v in _h_checks.items() if not v.get("ok", True) and not v.get("skipped", False)]
+        _h_ko_str  = ", ".join(_h_ko) if _h_ko else ""
+        if _h_overall == "OK":
+            health_badge_html = (
+                f"<span title='SOC Health OK — {_h_ts}' style='display:flex;align-items:center;"
+                f"gap:4px;padding:4px 10px;border-radius:16px;background:#052e16;border:1px solid #166534;"
+                f"font-size:10px;font-weight:600;color:#4ade80;white-space:nowrap;cursor:default'>"
+                f"<span class='dot-active'></span>SOC OK</span>"
+            )
+        elif _h_overall == "WARN":
+            health_badge_html = (
+                f"<span title='WARN: {_h_ko_str} — {_h_ts}' style='display:flex;align-items:center;"
+                f"gap:4px;padding:4px 10px;border-radius:16px;background:#451a03;border:1px solid #d97706;"
+                f"font-size:10px;font-weight:600;color:#fbbf24;white-space:nowrap;cursor:default'>⚠ SOC WARN</span>"
+            )
+        else:
+            health_badge_html = (
+                f"<span title='KO: {_h_ko_str} — {_h_ts}' style='display:flex;align-items:center;"
+                f"gap:4px;padding:4px 10px;border-radius:16px;background:#450a0a;border:1px solid #dc2626;"
+                f"font-size:10px;font-weight:600;color:#fca5a5;white-space:nowrap;cursor:default'>✗ SOC KO</span>"
+            )
+    else:
+        health_badge_html = ""
 
     # ── Annotations ──
     ann_path = "/home/ubuntu/secops/annotations.json"
@@ -860,6 +900,8 @@ function askAIWithPrompt(p){{
 <meta name="theme-color" content="#6366f1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -910,9 +952,9 @@ h2{{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--mut
 
 /* ── Layout ── */
 .main{{flex:1;padding:18px 24px;max-width:1600px;width:100%;margin:0 auto}}
-.screen{{display:none;animation:fadeIn .2s ease}}
-.screen.active{{display:block}}
-@keyframes fadeIn{{from{{opacity:0;transform:translateY(4px)}}to{{opacity:1;transform:translateY(0)}}}}
+.screen{{display:none}}
+.screen.active{{display:block;animation:screenIn .28s cubic-bezier(.16,.84,.44,1)}}
+@keyframes screenIn{{from{{opacity:0;transform:translateY(8px)}}to{{opacity:1;transform:translateY(0)}}}}
 .grid{{display:grid;gap:14px}}
 .g2{{grid-template-columns:repeat(2,1fr)}}.g3{{grid-template-columns:repeat(3,1fr)}}
 .g4{{grid-template-columns:repeat(4,1fr)}}.g5{{grid-template-columns:repeat(5,1fr)}}
@@ -925,7 +967,7 @@ h2{{font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:var(--mut
 /* ── Cards ── */
 .card{{background:var(--bg3);border:1px solid var(--border);border-radius:14px;padding:18px;transition:border-color .2s,box-shadow .2s}}
 .card:hover{{border-color:var(--border2);box-shadow:0 2px 16px rgba(99,102,241,.06)}}
-.stat-big{{font-size:30px;font-weight:800;line-height:1;letter-spacing:-1px}}
+.stat-big{{font-size:30px;font-weight:700;line-height:1;letter-spacing:-.5px;font-family:'JetBrains Mono',ui-monospace,monospace}}
 .stat-label{{font-size:11px;color:var(--muted);margin-top:5px;font-weight:500}}
 .stat-sub{{font-size:10px;color:var(--dim);margin-top:3px}}
 
@@ -1080,9 +1122,11 @@ tr:last-child td{{border-bottom:none}}
 .empty-state p{{font-size:13px}}
 /* ── Threat hero ── */
 .threat-hero{{border-radius:14px;padding:20px 24px;display:flex;align-items:center;gap:20px;border:1px solid}}
-.threat-hero-score{{font-size:52px;font-weight:800;line-height:1;letter-spacing:-3px}}
+.threat-hero-score{{font-size:52px;font-weight:700;line-height:1;letter-spacing:-2px;font-family:'JetBrains Mono',ui-monospace,monospace}}
 .threat-hero-bar{{height:6px;border-radius:3px;background:#1e2942;margin-top:10px;overflow:hidden}}
 .threat-hero-fill{{height:6px;border-radius:3px;transition:width .8s ease}}
+/* ── JetBrains Mono override pour éléments monospace ── */
+[style*="font-family:monospace"]{{font-family:'JetBrains Mono',ui-monospace,monospace!important;letter-spacing:.02em}}
 /* ── Sparkline canvas ── */
 .sparkline{{display:block;width:100%;height:40px;margin-top:6px;opacity:.7}}
 /* ── Age indicator ── */
@@ -1204,6 +1248,18 @@ tr:last-child td{{border-bottom:none}}
     </div>
   </div>
   <div class="settings-section">
+    <div class="settings-section-title">Notifications Telegram</div>
+    <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:6px">
+      <div><div class="settings-label">Token Bot</div><div class="settings-sub">Obtenu via @BotFather</div></div>
+      <input class="settings-input" id="cfg-telegram-token" type="password" placeholder="123456:ABC..." style="width:100%;flex:1;text-align:left">
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-label">Chat ID</div><div class="settings-sub">ID du canal ou groupe</div></div>
+      <input class="settings-input" id="cfg-telegram-chat" type="text" placeholder="-100..." style="width:100px">
+    </div>
+    <button onclick="testTelegram(this)" style="width:100%;background:#0d1b2a;border:1px solid #1d4ed8;color:#93c5fd;padding:8px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;margin-top:4px">📨 Envoyer message test</button>
+  </div>
+  <div class="settings-section">
     <div class="settings-section-title">Sécurité session</div>
     <div class="settings-row">
       <div><div class="settings-label">Auto-logout</div><div class="settings-sub">Minutes d'inactivité (0 = désactivé)</div></div>
@@ -1302,6 +1358,7 @@ tr:last-child td{{border-bottom:none}}
       <span id="st-sse" title="SSE live" style="font-size:10px;display:flex;align-items:center;gap:3px;color:var(--muted)"><span style="width:7px;height:7px;border-radius:50%;background:#334155;display:inline-block" id="dot-sse"></span>sse</span>
     </div>
     <span id="oncall-badge" style="display:none" class="oncall-badge oncall-on">ON CALL</span>
+    {health_badge_html}
     <button onclick="openSettings()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:5px 10px;border-radius:6px;cursor:pointer;font-size:13px" title="Paramètres">⚙️</button>
     <button id="theme-toggle" onclick="toggleTheme()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:5px 10px;border-radius:6px;cursor:pointer;font-size:13px" title="Mode sombre/clair">🌙</button>
     {ir_btn}
@@ -1372,7 +1429,7 @@ tr:last-child td{{border-bottom:none}}
         <div class="sparkline" id="sp-ram"></div>
       </div>
       <div class="card">
-        <div class="stat-big" style="color:{disk_color}">{metrics['disk']:.0f}%</div>
+        <div class="stat-big" style="color:{disk_color}" id="live-disk">{metrics['disk']:.0f}%</div>
         <div class="stat-label">Disque</div>
         <div class="stat-sub">{metrics['disk_used']}GB / {metrics['disk_total']}GB</div>
         <div class="sparkline" id="sp-disk"></div>
@@ -1383,12 +1440,12 @@ tr:last-child td{{border-bottom:none}}
         <div class="stat-sub">fail2ban actif</div>
       </div>
       <div class="card">
-        <div class="stat-big" style="color:#f59e0b">{ssh_total}</div>
+        <div class="stat-big" style="color:#f59e0b" id="live-ssh">{ssh_total}</div>
         <div class="stat-label">Échecs SSH 24h</div>
         <div class="stat-sub">{len(ssh_fails)} IPs distinctes</div>
       </div>
       <div class="card">
-        <div class="stat-big" style="color:#ef4444">{bans_today}{trend_html}</div>
+        <div class="stat-big" style="color:#ef4444"><span id="live-bans-today">{bans_today}</span>{trend_html}</div>
         <div class="stat-label">Auto-bans aujourd'hui</div>
       </div>
     </div>
@@ -1755,6 +1812,7 @@ async function loadSettingsFromServer(){{
     if(el('cfg-f2b-findtime'))el('cfg-f2b-findtime').value=cfg.f2b_findtime||600;
     if(el('cfg-subnet-ban'))el('cfg-subnet-ban').checked=!!cfg.subnet_ban_enabled;
     if(el('cfg-subnet-threshold'))el('cfg-subnet-threshold').value=cfg.subnet_ban_threshold||3;
+    if(el('cfg-telegram-chat'))el('cfg-telegram-chat').value=cfg.telegram_chat_id||'';
     updateOncallBadge(!!cfg.oncall);
     applyAutologout();
   }}catch(e){{}}
@@ -1778,7 +1836,9 @@ async function saveSettings(){{
     f2b_maxretry:parseInt(el('cfg-f2b-maxretry')?.value||5),
     f2b_findtime:parseInt(el('cfg-f2b-findtime')?.value||600),
     subnet_ban_enabled:el('cfg-subnet-ban')?.checked||false,
-    subnet_ban_threshold:parseInt(el('cfg-subnet-threshold')?.value||3)
+    subnet_ban_threshold:parseInt(el('cfg-subnet-threshold')?.value||3),
+    telegram_token:el('cfg-telegram-token')?.value.trim()||'',
+    telegram_chat_id:el('cfg-telegram-chat')?.value.trim()||''
   }};
   try{{
     const r=await fetch('/action/config',{{method:'POST',headers:{{'Content-Type':'application/json','X-SOC-Key':key}},body:JSON.stringify(payload)}});
@@ -1842,7 +1902,16 @@ async function clearGeoCache(btn){{
   const r=await apiCall('/maintenance/clear-geo',{{}},btn);
   if(r)showToast(r.ok?'✓ Cache géo vidé — rechargement au prochain cycle':r.error,r.ok);
 }}
-(function(){{loadSettingsFromServer();}})();
+async function testTelegram(btn){{
+  const token=document.getElementById('cfg-telegram-token')?.value.trim();
+  const chatId=document.getElementById('cfg-telegram-chat')?.value.trim();
+  if(!token||!chatId){{showToast('Renseignez le token et le chat ID',false);return;}}
+  const saveR=await apiCall('/config',{{telegram_token:token,telegram_chat_id:chatId}},null);
+  if(!saveR||!saveR.ok){{showToast('Erreur sauvegarde config',false);return;}}
+  const r=await apiCall('/notify/telegram',{{message:'🛡️ <b>ViaDigiTech SOC</b> — Test de notification Telegram ✓\nConfiguration opérationnelle.'}},btn);
+  if(r)showToast(r.ok?'✓ Message Telegram envoyé !':'Erreur: '+(r.error||'inconnue'),r.ok);
+}}
+(function(){{loadSettingsFromServer();setTimeout(animateCounters,200);}})();
 
 // ── Status bar ──
 function setDot(id,ok){{
@@ -1861,16 +1930,41 @@ async function refreshStatusBar(){{
 refreshStatusBar();
 setInterval(refreshStatusBar,60000);
 
+// ── Compteurs animés ──
+function animateCounter(el,target,suffix){{
+  if(!el)return;
+  const dur=700;
+  function ease(t){{return t<.5?2*t*t:1-Math.pow(-2*t+2,2)/2;}}
+  let startTs=null;
+  function step(ts){{
+    if(!startTs)startTs=ts;
+    const p=Math.min((ts-startTs)/dur,1);
+    el.textContent=Math.round(ease(p)*target)+(suffix||'');
+    if(p<1)requestAnimationFrame(step);
+  }}
+  requestAnimationFrame(step);
+}}
+function animateCounters(){{
+  animateCounter(document.getElementById('live-cpu'),{metrics['cpu']:.0f},'%');
+  animateCounter(document.getElementById('live-ram'),{metrics['ram']:.0f},'%');
+  animateCounter(document.getElementById('live-disk'),{metrics['disk']:.0f},'%');
+  animateCounter(document.getElementById('live-bans'),{ban_count},'');
+  animateCounter(document.getElementById('live-ssh'),{ssh_total},'');
+  animateCounter(document.getElementById('live-bans-today'),{bans_today},'');
+}}
+
 // ── Navigation ──
 function showScreen(id){{
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.querySelectorAll('.nav-item,.bn-item,.nav-drawer-item').forEach(n=>n.classList.remove('active'));
-  document.getElementById('screen-'+id).classList.add('active');
+  const el=document.getElementById('screen-'+id);
+  if(el){{el.style.animation='none';void el.offsetWidth;el.style.animation='';el.classList.add('active');}}
   const di=document.getElementById('nav-'+id);   if(di)di.classList.add('active');
   const bi=document.getElementById('bn-'+id);    if(bi)bi.classList.add('active');
   const ddi=document.getElementById('dnav-'+id); if(ddi)ddi.classList.add('active');
   if(id==='security'&&window._leafletMap) setTimeout(()=>window._leafletMap.invalidateSize(),50);
   if(id==='performance') setTimeout(()=>window.dispatchEvent(new Event('resize')),50);
+  if(id==='overview') setTimeout(animateCounters,50);
   sessionStorage.setItem('soc_screen',id);
 }}
 (function(){{const s=sessionStorage.getItem('soc_screen');if(s)showScreen(s);}})();

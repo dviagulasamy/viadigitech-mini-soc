@@ -307,6 +307,8 @@ SOC_CONFIG_DEFAULTS = {
     "f2b_findtime": 600,
     "subnet_ban_enabled": False,
     "subnet_ban_threshold": 3,
+    "telegram_token": "",
+    "telegram_chat_id": "",
 }
 
 def load_soc_config():
@@ -359,7 +361,7 @@ def set_config():
                    "warn_cpu", "crit_cpu", "sse_interval", "autologout",
                    "f2b_bantime", "f2b_maxretry", "f2b_findtime", "subnet_ban_threshold"]
     allowed_bool = ["oncall", "subnet_ban_enabled"]
-    allowed_str = ["oncall_name"]
+    allowed_str = ["oncall_name", "telegram_token", "telegram_chat_id"]
     for k in allowed_int:
         if k in data:
             try:
@@ -383,8 +385,46 @@ def set_config():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-IMGDIR_REPORTS = "/var/www/html/viadigitech-reports"
-GEO_CACHE_FILE = "/home/ubuntu/secops/geo_cache.json"
+IMGDIR_REPORTS  = "/var/www/html/viadigitech-reports"
+GEO_CACHE_FILE  = "/home/ubuntu/secops/geo_cache.json"
+SOC_HEALTH_FILE = "/home/ubuntu/secops/soc_health.json"
+
+
+@app.route("/health", methods=["GET"])
+def get_health():
+    """Retourne l'état de santé du SOC — pas d'auth requise."""
+    if not os.path.exists(SOC_HEALTH_FILE):
+        return jsonify({"ok": False, "overall": "UNKNOWN", "error": "Health check non encore exécuté"})
+    try:
+        with open(SOC_HEALTH_FILE) as f:
+            data = json.load(f)
+        return jsonify({"ok": True, **data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/notify/telegram", methods=["POST"])
+@require_key
+def notify_telegram():
+    """Envoie une notification Telegram manuelle depuis le dashboard."""
+    data = request.get_json(force=True) or {}
+    message = str(data.get("message", "")).strip()[:500]
+    if not message:
+        return jsonify({"ok": False, "error": "Message vide"}), 400
+    cfg = load_soc_config()
+    token   = cfg.get("telegram_token", "")   or os.environ.get("TELEGRAM_TOKEN", "")
+    chat_id = cfg.get("telegram_chat_id", "") or os.environ.get("TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        return jsonify({"ok": False, "error": "Telegram non configuré (token/chat_id manquants)"}), 400
+    try:
+        r = requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
+            timeout=8
+        )
+        return jsonify({"ok": r.status_code == 200, "detail": r.json() if r.status_code == 200 else r.text})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/fail2ban/status", methods=["GET"])
 @require_key
