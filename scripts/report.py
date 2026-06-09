@@ -231,23 +231,30 @@ def chart_users(failed_users, n=10):
     return _save(fig, "users")
 
 def chart_history():
-    """Courbes historiques CPU / SSH depuis le CSV de l'ancien script."""
-    csv_path = "/home/ubuntu/viadigitech-soc-v5-3/logs/banned-history.csv"
+    """Courbes historiques CPU / RAM depuis metrics_history.csv (15min)."""
+    csv_path = "/home/ubuntu/secops/metrics_history.csv"
     if not os.path.exists(csv_path): return None
     try:
         import pandas as pd
-        df = pd.read_csv(csv_path, parse_dates=["date"])
-        df = df.tail(30)
+        df = pd.read_csv(csv_path, parse_dates=["timestamp"])
+        df = df.tail(96)  # ~24h à 15min d'intervalle
         if len(df) < 3: return None
+        dates = df["timestamp"].to_numpy()
+        cpu   = df["cpu"].to_numpy()
+        ram   = df["ram"].to_numpy()
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 5), facecolor=C["surface"])
-        for ax in (ax1, ax2): ax.set_facecolor(C["surface"]); ax.spines[:].set_color(C["border"])
-        ax1.plot(df["date"], df["cpu"], color=C["accent"], linewidth=2, marker="o", markersize=3)
-        ax1.fill_between(df["date"], df["cpu"], alpha=0.15, color=C["accent"])
-        ax1.set_ylabel("CPU %", color=C["text"], fontsize=9); ax1.tick_params(colors=C["text"], labelsize=8)
-        ax1.set_title("Historique 30 jours", color=C["text"], fontsize=12, fontweight="bold")
-        ax2.plot(df["date"], df["ssh_fail"], color=C["red"], linewidth=2, marker="o", markersize=3)
-        ax2.fill_between(df["date"], df["ssh_fail"], alpha=0.15, color=C["red"])
-        ax2.set_ylabel("Tentatives SSH", color=C["text"], fontsize=9); ax2.tick_params(colors=C["text"], labelsize=8)
+        for ax in (ax1, ax2):
+            ax.set_facecolor(C["surface"])
+            ax.spines[:].set_color(C["border"])
+        ax1.plot(dates, cpu, color=C["accent"], linewidth=2, marker="o", markersize=3)
+        ax1.fill_between(dates, cpu, alpha=0.15, color=C["accent"])
+        ax1.set_ylabel("CPU %", color=C["text"], fontsize=9)
+        ax1.tick_params(colors=C["text"], labelsize=8)
+        ax1.set_title("Historique 24h — CPU & RAM", color=C["text"], fontsize=12, fontweight="bold")
+        ax2.plot(dates, ram, color=C["green"], linewidth=2, marker="o", markersize=3)
+        ax2.fill_between(dates, ram, alpha=0.15, color=C["green"])
+        ax2.set_ylabel("RAM %", color=C["text"], fontsize=9)
+        ax2.tick_params(colors=C["text"], labelsize=8)
         fig.tight_layout()
         return _save(fig, "history")
     except Exception as e:
