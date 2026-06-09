@@ -554,6 +554,121 @@ def collect_live_metrics():
         "ts": int(time.time())
     }
 
+AUDIT_LOG = "/home/ubuntu/secops/audit_actions.csv"
+TI_MATCHES_FILE = "/home/ubuntu/secops/ti_matches.json"
+
+
+# ─────────────────────────────────────────
+# F12 — Export SIEM/CEF
+# ─────────────────────────────────────────
+
+@app.route("/export/siem", methods=["GET"])
+@require_key
+def export_siem():
+    import csv as _csv
+    fmt = request.args.get("format", "json")
+    rows = []
+    if os.path.exists(AUDIT_LOG):
+        with open(AUDIT_LOG) as f:
+            reader = _csv.reader(f)
+            for row in reader:
+                if len(row) < 4 or row[0] == "timestamp":
+                    continue
+                rows.append(row)
+    rows = rows[-500:]  # 500 derniers événements
+
+    if fmt == "cef":
+        lines = []
+        for row in rows:
+            ts, ip, action = row[0][:19], row[1].strip(), row[2].strip()
+            score  = row[3].strip() if len(row) > 3 else "0"
+            reason = (row[4][:120] if len(row) > 4 else "").replace(",", " ")
+            sev    = "9" if "BAN" in action else ("6" if "WATCH" in action else "3")
+            lines.append(
+                f"CEF:0|ViaDigiTech|SOC|1.0|{action}|SSH Threat Detection|{sev}|"
+                f"src={ip} dpt=22 act={action} cs1={score} cs1Label=AbuseScore "
+                f"msg={reason} end={ts}"
+            )
+        content = "\n".join(lines)
+        return Response(
+            content,
+            mimetype="text/plain",
+            headers={"Content-Disposition": "attachment;filename=soc_events.cef"}
+        )
+    else:
+        events = [
+            {"ts": r[0], "src_ip": r[1].strip(), "action": r[2].strip(),
+             "score": r[3].strip(), "reason": r[4].strip() if len(r) > 4 else ""}
+            for r in rows
+        ]
+        return jsonify({
+            "events": events,
+            "count": len(events),
+            "format": "json-siem",
+            "exported_at": __import__("datetime").datetime.now().isoformat()
+        })
+
+
+# ─────────────────────────────────────────
+# F10 — Blocage ASN
+# ─────────────────────────────────────────
+
+@app.route("/block/asn", methods=["POST"])
+@require_key
+def block_asn():
+    """Bannit toutes les IPs connues d'un ASN via Fail2Ban."""
+    data = request.get_json(silent=True) or {}
+    asn  = data.get("asn", "").strip()
+    if not asn or not asn.startswith("AS"):
+        return jsonify({"ok": False, "error": "ASN invalide (format: AS12345)"}), 400
+
+    # Chercher les IPs de cet ASN dans ti_matches + geo_cache
+    ips_to_ban = set()
+
+    if os.path.exists(TI_MATCHES_FILE):
+        try:
+            with open(TI_MATCHES_FILE) as f:
+                ti = json.load(f)
+            for ip in ti:
+                if valid_ip(ip):
+                    ips_to_ban.add(ip)
+        except Exception:
+            pass
+
+    if os.path.exists(GEO_CACHE_FILE):
+        try:
+            with open(GEO_CACHE_FILE) as f:
+                geo = json.load(f)
+            for ip, info in geo.items():
+                if info.get("asn") == asn and valid_ip(ip):
+                    ips_to_ban.add(ip)
+        except Exception:
+            pass
+
+    banned = 0
+    errors = []
+    for ip in ips_to_ban:
+        try:
+            r = subprocess.run(
+                ["sudo", "fail2ban-client", "set", "sshd", "banip", ip],
+                capture_output=True, text=True, timeout=10
+            )
+            if r.returncode == 0:
+                banned += 1
+            else:
+                errors.append(ip)
+        except Exception as e:
+            errors.append(ip)
+
+    return jsonify({
+        "ok": True,
+        "asn": asn,
+        "banned": banned,
+        "total_candidates": len(ips_to_ban),
+        "errors": errors[:5]
+    })
+
+
 @app.route("/stream")
 def sse_stream():
     """SSE endpoint — métriques live toutes les 30s."""

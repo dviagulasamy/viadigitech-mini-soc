@@ -266,7 +266,7 @@ def get_geo_data(ips):
     if to_lookup:
         try:
             payload = json.dumps([
-                {"query": ip, "fields": "query,lat,lon,country,city,countryCode,status"}
+                {"query": ip, "fields": "query,lat,lon,country,city,countryCode,org,status"}
                 for ip in to_lookup
             ]).encode()
             req = urllib.request.Request(
@@ -276,11 +276,15 @@ def get_geo_data(ips):
             with urllib.request.urlopen(req, timeout=5) as resp:
                 for item in json.loads(resp.read()):
                     if item.get("status") != "fail":
+                        org = item.get("org", "")
+                        asn = org.split()[0] if org.startswith("AS") else ""
                         cache[item["query"]] = {
                             "lat": item.get("lat", 0), "lon": item.get("lon", 0),
                             "country": item.get("country", "?"),
                             "city": item.get("city", ""),
-                            "cc": item.get("countryCode", "")
+                            "cc": item.get("countryCode", ""),
+                            "org": org,
+                            "asn": asn,
                         }
         except:
             pass
@@ -694,6 +698,36 @@ def build_html():
             ti_label = ti_src[0][:14] if ti_src else "TI"
             ti_badge = f"<span style='font-size:9px;font-weight:700;background:#7c3aed22;color:#a78bfa;border:1px solid #7c3aed55;border-radius:4px;padding:1px 5px;margin-left:4px' title='Threat Intel: {ti_label}'>🦠 TI</span>"
         top_ip_rows += f"<tr data-ip='{ip}'><td style='font-family:monospace;font-size:12px'>{is_banned} {ip_link}{ti_badge}{loc}{btn}</td><td style='text-align:right;font-weight:700;color:#ef4444'>{count}</td></tr>"
+
+    # ── F10 : ASN analysis ──
+    from collections import defaultdict as _dd
+    asn_bans = _dd(lambda: {"bans": 0, "ips": set(), "org": ""})
+    for row in audit_rows:
+        if "BAN" not in row[2]:
+            continue
+        ip = row[1].strip()
+        geo = geo_data.get(ip, {})
+        asn = geo.get("asn", "")
+        if asn:
+            asn_bans[asn]["bans"] += 1
+            asn_bans[asn]["ips"].add(ip)
+            asn_bans[asn]["org"] = geo.get("org", asn)
+    asn_rows = ""
+    for asn, info in sorted(asn_bans.items(), key=lambda x: -x[1]["bans"])[:6]:
+        n_bans = info["bans"]
+        n_ips  = len(info["ips"])
+        org    = info["org"][:40]
+        block_btn = (
+            f"""<button onclick="blockASN('{asn}')" """
+            f"""class="btn-danger" style="font-size:10px;padding:2px 8px">Bloquer</button>"""
+        ) if ACTIONS_KEY and n_bans >= 3 else ""
+        asn_rows += (
+            f"<tr><td style='font-family:monospace;font-size:11px;color:#a5b4fc'>{asn}</td>"
+            f"<td style='font-size:11px;color:#94a3b8;max-width:180px;overflow:hidden;text-overflow:ellipsis'>{org}</td>"
+            f"<td style='text-align:right;color:#ef4444;font-weight:700'>{n_bans}</td>"
+            f"<td style='text-align:right;color:#f59e0b'>{n_ips}</td>"
+            f"<td>{block_btn}</td></tr>"
+        )
 
     # ── Connexions légitimes ──
     accepted_html = ""
@@ -1246,6 +1280,20 @@ tr:last-child td{{border-bottom:none}}
 /* ── Age indicator ── */
 .age-indicator{{font-size:11px;color:#475569;padding:0 8px;white-space:nowrap}}
 .age-indicator.fresh{{color:#22c55e}}
+/* ── V5 Skeleton loading ── */
+@keyframes skeletonShimmer{{0%{{background-position:-200% 0}}100%{{background-position:200% 0}}}}
+.skeleton{{background:linear-gradient(90deg,#1e2942 25%,#2a3a5c 50%,#1e2942 75%);
+  background-size:200% 100%;animation:skeletonShimmer 1.2s infinite;
+  border-radius:6px;color:transparent!important;min-width:40px;display:inline-block}}
+/* ── F13 Playbooks IR ── */
+.playbook-card{{flex:1;min-width:220px;background:#0d1117;border:1px solid #334155;border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px}}
+.pb-title{{font-size:13px;font-weight:700;color:#fca5a5;margin-bottom:4px}}
+.pb-steps{{display:flex;flex-direction:column;gap:6px}}
+.pb-step{{font-size:12px;color:#94a3b8;display:flex;align-items:flex-start;gap:8px;cursor:pointer;line-height:1.5}}
+.pb-step input[type=checkbox]{{margin-top:2px;accent-color:#ef4444;flex-shrink:0}}
+.pb-step:has(input:checked){{color:#475569;text-decoration:line-through}}
+.pb-report-btn{{background:#7f1d1d;border:1px solid #dc2626;color:#fca5a5;padding:7px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;margin-top:auto;transition:background .15s}}
+.pb-report-btn:hover{{background:#991b1b}}
 .age-indicator.stale{{color:#f59e0b}}
 /* ── Recherche globale Ctrl+K ── */
 .cmdk-overlay{{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:4000;align-items:flex-start;justify-content:center;padding-top:15vh;backdrop-filter:blur(4px)}}
@@ -1262,6 +1310,20 @@ tr:last-child td{{border-bottom:none}}
 .cmdk-footer{{padding:8px 16px;font-size:11px;color:#334155;border-top:1px solid #1e2942;display:flex;gap:16px}}
 /* ── Mode IR ── */
 .ir-mode body{{background:#1a0000}}
+/* V8 — IR dramatisé */
+@keyframes irBodyPulse{{0%,100%{{box-shadow:inset 0 0 0 0 transparent}}50%{{box-shadow:inset 0 0 100px rgba(239,68,68,.10)}}}}
+@keyframes irBannerScroll{{0%{{background-position:0 0}}100%{{background-position:200% 0}}}}
+@keyframes irBannerBlink{{0%,100%{{opacity:1}}50%{{opacity:.75}}}}
+body.ir-active{{animation:irBodyPulse 2.5s ease-in-out infinite}}
+.ir-banner{{display:none;position:fixed;top:0;left:0;right:0;z-index:8500;
+  background:linear-gradient(90deg,#7f1d1d,#dc2626,#991b1b,#dc2626,#7f1d1d);
+  background-size:200% 100%;
+  animation:irBannerScroll 4s linear infinite,irBannerBlink 1.8s ease-in-out infinite;
+  padding:5px 16px;text-align:center;font-size:11px;font-weight:800;
+  color:#fca5a5;letter-spacing:2px;text-transform:uppercase;
+  border-bottom:1px solid #ef4444;cursor:pointer}}
+body.ir-active .ir-banner{{display:block}}
+body.ir-active .topbar{{margin-top:28px}}
 .ir-overlay{{display:none;position:fixed;inset:0;background:#0a0d14;z-index:5000;flex-direction:column;overflow-y:auto}}
 .ir-overlay.open{{display:flex}}
 .ir-header{{padding:16px 24px;background:#1a0000;border-bottom:2px solid #dc2626;display:flex;align-items:center;justify-content:space-between}}
@@ -1271,6 +1333,8 @@ tr:last-child td{{border-bottom:none}}
 .ir-card{{background:#111827;border:1px solid #334155;border-radius:12px;padding:16px}}
 </style>
 </head><body>
+<!-- V8 — IR banner (visible uniquement si body.ir-active) -->
+<div class="ir-banner" id="ir-banner" onclick="openIR()">🚨 INCIDENT ACTIF — CLIQUER POUR OUVRIR LE MODE IR</div>
 <div id="toast"></div>
 
 <!-- ═══ LOGIN ═══ -->
@@ -1761,6 +1825,11 @@ tr:last-child td{{border-bottom:none}}
       </div>
       {"<div class='empty-state'><svg viewBox='0 0 24 24'><path d='M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z'/></svg><p>Whitelist vide</p></div>" if not whitelist_html else f"<div class='table-wrap'><table><thead><tr><th>IP / Réseau</th><th></th></tr></thead><tbody>{whitelist_html}</tbody></table></div>"}
     </div>
+    <!-- F10 — Blocage ASN -->
+    <div class="card">
+      <h2>ASN les plus agressifs (24h)</h2>
+      {"<div class='empty-state'><p>Pas encore de données ASN (géo cache)</p></div>" if not asn_rows else f"<div class='table-wrap'><table><thead><tr><th>ASN</th><th>Opérateur</th><th style='text-align:right'>Bans</th><th style='text-align:right'>IPs</th><th></th></tr></thead><tbody>{asn_rows}</tbody></table></div>"}
+    </div>
     <div class="card">
       <h2>Conteneurs Docker — {len(containers)} · {sum(1 for c in containers if 'Up' in c.get('Status',''))} actifs</h2>
       <div class="grid g2" style="margin-top:4px">
@@ -1844,6 +1913,45 @@ tr:last-child td{{border-bottom:none}}
     <div class="ir-card" style="grid-column:1/-1">
       <h2>Derniers événements</h2>
       <div id="ir-timeline" style="font-size:12px;font-family:monospace;line-height:1.8;max-height:200px;overflow-y:auto"></div>
+    </div>
+    <!-- F13 — Playbooks IR -->
+    <div class="ir-card" style="grid-column:1/-1">
+      <h2 style="margin-bottom:14px">📋 Playbooks de réponse à incident</h2>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <div class="playbook-card" id="pb-bruteforce">
+          <div class="pb-title">🔨 Brute-force SSH massif</div>
+          <div class="pb-steps">
+            <label class="pb-step"><input type="checkbox"> Vérifier le volume dans la Timeline</label>
+            <label class="pb-step"><input type="checkbox"> Identifier les IPs &gt; 50 tentatives</label>
+            <label class="pb-step"><input type="checkbox"> Bannir les top IPs via le dashboard</label>
+            <label class="pb-step"><input type="checkbox"> Vérifier si un bloc /24 est concerné</label>
+            <label class="pb-step"><input type="checkbox"> Documenter l'incident (heure, IPs, score)</label>
+          </div>
+          <button class="pb-report-btn" onclick="generateIRReport('Brute-force SSH massif')">📄 Générer rapport IR</button>
+        </div>
+        <div class="playbook-card" id="pb-recon">
+          <div class="pb-title">🔍 Reconnaissance / Scan de port</div>
+          <div class="pb-steps">
+            <label class="pb-step"><input type="checkbox"> Identifier les ports ciblés (syslog)</label>
+            <label class="pb-step"><input type="checkbox"> Analyser les logs auth.log complets</label>
+            <label class="pb-step"><input type="checkbox"> Lookup AbuseIPDB sur l'IP source</label>
+            <label class="pb-step"><input type="checkbox"> Bannir définitivement si score &gt; 80</label>
+            <label class="pb-step"><input type="checkbox"> Vérifier les autres services exposés</label>
+          </div>
+          <button class="pb-report-btn" onclick="generateIRReport('Reconnaissance et scan de port')">📄 Générer rapport IR</button>
+        </div>
+        <div class="playbook-card" id="pb-account">
+          <div class="pb-title">🔑 Compromission compte légitime</div>
+          <div class="pb-steps">
+            <label class="pb-step"><input type="checkbox"> Identifier le compte utilisé (who)</label>
+            <label class="pb-step"><input type="checkbox"> Vérifier IP source (géo + heure)</label>
+            <label class="pb-step"><input type="checkbox"> Bloquer l'IP source immédiatement</label>
+            <label class="pb-step"><input type="checkbox"> Forcer le changement de credentials</label>
+            <label class="pb-step"><input type="checkbox"> Auditer les actions post-connexion</label>
+          </div>
+          <button class="pb-report-btn" onclick="generateIRReport('Compromission de compte légitime')">📄 Générer rapport IR</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -2331,11 +2439,38 @@ function filterTable(tableId,inputId){{
       else if(intensity<0.5)bg='#7f1d1d';
       else if(intensity<0.75)bg='#b91c1c';
       else bg='#ef4444';
-      html+=`<div class="hm-cell" style="background:${{bg}};cursor:${{v>0?'pointer':'default'}}" title="${{days[d]}} ${{h.toString().padStart(2,'0')}}h : ${{v}} tentatives" onclick="hmDrilldown('${{days[d]}}','${{h}}','${{v}}')"></div>`;
+      html+=`<div class="hm-cell" style="background:${{bg}};cursor:${{v>0?'pointer':'default'}}" data-count="${{v}}" data-day="${{days[d]}}" data-hour="${{h}}" onclick="hmDrilldown('${{days[d]}}','${{h}}','${{v}}')"></div>`;
     }}
   }}
   html+='</div>';
   container.innerHTML=html;
+}})();
+
+// V6 — Heatmap rich tooltip
+(function(){{
+  const tip=document.createElement('div');
+  tip.id='hm-tip';
+  tip.style.cssText='position:fixed;background:#0d1117;border:1px solid #ef444488;border-radius:8px;padding:10px 14px;font-size:12px;color:#f1f5f9;pointer-events:none;display:none;z-index:9990;box-shadow:0 6px 24px rgba(0,0,0,.8);min-width:160px';
+  document.body.appendChild(tip);
+  document.addEventListener('mousemove',e=>{{
+    const cell=e.target.closest('.hm-cell');
+    if(!cell){{tip.style.display='none';return;}}
+    const count=parseInt(cell.dataset.count||0);
+    const day=cell.dataset.day||'';
+    const hour=cell.dataset.hour||'';
+    const sev=count===0?'<span style="color:#475569">Aucune activité</span>':
+              count<5?`<span style="color:#fbbf24">Faible (${{count}})</span>`:
+              count<20?`<span style="color:#f97316">Modérée (${{count}})</span>`:
+              `<span style="color:#ef4444;font-weight:700">Élevée (${{count}})</span>`;
+    tip.innerHTML=`<div style="font-weight:700;margin-bottom:4px;color:#94a3b8">${{day}} ${{String(hour).padStart(2,'0')}}h00</div>`+
+      `<div>Tentatives SSH : ${{sev}}</div>`+
+      (count>0?`<div style="font-size:10px;color:#475569;margin-top:4px;cursor:pointer" onclick="hmDrilldown('${{day}}','${{hour}}','${{count}}')">↗ Voir Timeline</div>`:'');
+    const x=e.clientX+14, y=e.clientY-10;
+    tip.style.left=Math.min(x,window.innerWidth-180)+'px';
+    tip.style.top=Math.min(y,window.innerHeight-80)+'px';
+    tip.style.display='block';
+  }});
+  document.addEventListener('mouseleave',()=>{{tip.style.display='none';}},true);
 }})();
 
 function hmDrilldown(day,hour,count){{
@@ -2351,11 +2486,15 @@ function hmDrilldown(day,hour,count){{
   {geo_markers_js}
 }})();
 
-// ── Sparklines ECharts ──
+// ── Sparklines ECharts (V9 — gradient fill) ──
 (function(){{
   const cpu={perf_cpu_js};
   const ram={perf_ram_js};
   const disk={perf_disk_js};
+  function hexRgba(hex,a){{
+    const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+    return `rgba(${{r}},${{g}},${{b}},${{a}})`;
+  }}
   function spark(id,data,color){{
     const el=document.getElementById(id);
     if(!el||!data||data.length<2)return;
@@ -2363,16 +2502,25 @@ function hmDrilldown(day,hour,count){{
     const chart=echarts.init(el,null,{{renderer:'canvas',width:'auto',height:40}});
     chart.setOption({{
       animation:false,
-      grid:{{top:0,bottom:0,left:0,right:0}},
+      grid:{{top:2,bottom:2,left:0,right:0}},
       xAxis:{{type:'category',show:false,data:d.map((_,i)=>i)}},
       yAxis:{{type:'value',show:false,min:0,max:100}},
       series:[{{
         type:'line',
         data:d,
-        lineStyle:{{color:color,width:1.5}},
+        lineStyle:{{color:color,width:2,shadowColor:hexRgba(color,.4),shadowBlur:4}},
         itemStyle:{{opacity:0}},
-        areaStyle:{{color:color,opacity:0.08}},
-        smooth:0.4,
+        areaStyle:{{
+          color:{{
+            type:'linear',x:0,y:0,x2:0,y2:1,
+            colorStops:[
+              {{offset:0,color:hexRgba(color,.45)}},
+              {{offset:0.6,color:hexRgba(color,.12)}},
+              {{offset:1,color:hexRgba(color,.01)}}
+            ]
+          }}
+        }},
+        smooth:0.45,
         symbol:'none'
       }}]
     }});
@@ -2462,9 +2610,13 @@ document.addEventListener('keydown',function(e){{
 
 // ── Mode IR ──
 function openIR(){{
+  document.body.classList.add('ir-active');
+  const score={threat};
+  const bannerTxt = score>=70?'🚨 MENACE ÉLEVÉE — INCIDENT ACTIF':score>=40?'⚠️ MENACE MODÉRÉE — SURVEILLER':'✅ MODE IR — Situation sous contrôle';
+  const banner=document.getElementById('ir-banner');
+  if(banner) banner.textContent=bannerTxt;
   const ol=document.getElementById('ir-overlay');
   ol.classList.add('open');
-  const score={threat};
   const color=score>=70?'#ef4444':score>=40?'#f59e0b':'#22c55e';
   const level=score>=70?'MENACE ÉLEVÉE':score>=40?'MENACE MODÉRÉE':'MENACE FAIBLE';
   document.getElementById('ir-score-display').textContent=score+'/100';
@@ -2487,7 +2639,34 @@ function openIR(){{
 }}
 function closeIR(){{
   document.getElementById('ir-overlay').classList.remove('open');
+  document.body.classList.remove('ir-active');
   if(window._irTimer)clearInterval(window._irTimer);
+}}
+
+// F13 — Rapport IR généré depuis playbook
+function generateIRReport(scenario){{
+  const now=new Date().toLocaleString('fr-FR');
+  const irScore={threat};
+  const topIps=document.getElementById('ir-top-ips')?.innerText||'—';
+  const steps=[...document.querySelectorAll('.playbook-card:not([style*="none"]) .pb-step input:checked')]
+    .map(cb=>cb.parentElement?.textContent?.trim()).filter(Boolean);
+  const doneStr=steps.length?steps.map((s,i)=>`  ${{i+1}}. ✅ ${{s}}`).join('\\n'):'  Aucune étape cochée';
+  showModal('Rapport IR — '+scenario,
+    `Scénario : ${{scenario}}\\nDate/Heure : ${{now}}\\nScore menace : ${{irScore}}/100\\n\\nTop menaces :\\n${{topIps}}\\n\\nÉtapes réalisées :\\n${{doneStr}}\\n\\n— Généré par ViaDigiTech SOC`,
+    'Copier',function(){{
+      navigator.clipboard?.writeText(
+        `RAPPORT IR — ${{scenario}}\\nDate : ${{now}}\\nScore : ${{irScore}}/100\\n\\n${{doneStr}}`
+      ).then(()=>showToast('Rapport copié',true));
+    }});
+}}
+
+// F10 — Blocage ASN
+async function blockASN(asn){{
+  showModal('Bloquer ASN','Bloquer toutes les IPs connues de '+asn+' via Fail2Ban ?','Confirmer',async()=>{{
+    const res=await apiCall('/block/asn',{{asn}});
+    if(res&&res.banned!==undefined)showToast(`ASN ${{asn}} : ${{res.banned}} IPs bannies`,true);
+    else showToast('Erreur blocage ASN',false);
+  }});
 }}
 
 // ── Logs live infra ──
@@ -2573,24 +2752,42 @@ function addAnnotation(){{
 }}
 renderAnnotations();
 
-// ── SSE live metrics ──
+// ── SSE live metrics (V5 — skeleton loading) ──
 (function(){{
   if(!window.EventSource)return;
   const key=sessionStorage.getItem('soc_key')||'';
+  const SKELETON_IDS=['live-cpu','live-ram','live-disk','live-bans'];
+  // Applique shimmer skeleton pendant la transition
+  function applySkeleton(){{
+    SKELETON_IDS.forEach(id=>{{
+      const el=document.getElementById(id);
+      if(el){{el.dataset.orig=el.textContent;el.textContent='     ';el.classList.add('skeleton');}}
+    }});
+  }}
+  function clearSkeleton(){{
+    SKELETON_IDS.forEach(id=>{{
+      const el=document.getElementById(id);
+      if(el)el.classList.remove('skeleton');
+    }});
+  }}
   const src=new EventSource('/action/stream?key='+encodeURIComponent(key));
   src.onmessage=function(e){{
     try{{
       const d=JSON.parse(e.data);
-      const cpuEl=document.getElementById('live-cpu');
-      const ramEl=document.getElementById('live-ram');
-      const banEl=document.getElementById('live-bans');
-      if(cpuEl)cpuEl.textContent=d.cpu+'%';
-      if(ramEl)ramEl.textContent=d.ram+'%';
-      if(banEl)banEl.textContent=d.bans;
-      setDot('dot-sse',true);
-    }}catch(err){{}}
+      applySkeleton();
+      setTimeout(()=>{{
+        const cpuEl=document.getElementById('live-cpu');
+        const ramEl=document.getElementById('live-ram');
+        const banEl=document.getElementById('live-bans');
+        if(cpuEl){{cpuEl.textContent=d.cpu+'%';}}
+        if(ramEl){{ramEl.textContent=d.ram+'%';}}
+        if(banEl){{banEl.textContent=d.bans;}}
+        clearSkeleton();
+        setDot('dot-sse',true);
+      }},320);
+    }}catch(err){{clearSkeleton();}}
   }};
-  src.onerror=function(){{setDot('dot-sse',false);src.close();}};
+  src.onerror=function(){{clearSkeleton();setDot('dot-sse',false);src.close();}};
 }})();
 
 // ── Theme toggle ──
