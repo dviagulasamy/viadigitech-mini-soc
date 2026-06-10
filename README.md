@@ -1,4 +1,4 @@
-# ViaDigiTech Mini-SOC IA — V10.0
+# ViaDigiTech Mini-SOC IA — V10.2
 
 > Plateforme SOAR autonome pour VPS/cloud : détection temps réel, scoring multi-facteurs, Threat Intelligence, honeypot SSH, analyse IA prédictive, dashboard SecOps premium et rapports automatiques.
 
@@ -146,7 +146,8 @@ sudo systemctl enable --now soc-actions soc-honeypot
 
 | URL | Service |
 |-----|---------|
-| `https://graph.viadigitech.com/soc/` | Dashboard SOC |
+| `https://graph.viadigitech.com` | Dashboard SOC (redirect auto → /soc/) |
+| `https://graph.viadigitech.com/soc/` | Dashboard SOC (accès direct) |
 | `https://graph.viadigitech.com/action/` | API actions Flask |
 | `https://graph.viadigitech.com/action/docs/` | Swagger UI |
 
@@ -160,7 +161,9 @@ sudo systemctl enable --now soc-actions soc-honeypot
 | **Sprint 2** | Jauge SVG 270°, timeline verticale, login glassmorphism, honeypot SSH, low&slow |
 | **Sprint 3** | TI feeds, scoring adaptatif, réponse graduée, rapport hebdo, IA prédictive |
 | **Sprint 4** | Skeleton loading, heatmap tooltips, IR dramatisé, sparklines gradient, ASN blocking, export SIEM, playbooks IR |
+| **Post-Sprint** | Notification bell, digest email configurable, filtres mail par type |
+| **V10.2** | Redirect graph.viadigitech.com → /soc/, topbar mobile responsive |
 
 ---
 
-*ViaDigiTech Mini-SOC — V10.0 — juin 2026*
+*ViaDigiTech Mini-SOC — V10.2 — 10 juin 2026*
