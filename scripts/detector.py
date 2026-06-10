@@ -31,6 +31,16 @@ except ImportError:
     def persist_ti_match(ip, ti_result):
         pass
 
+# F17 — SQLite
+try:
+    from soc_db import db_write_audit, db_add_score_history, db_get_stats
+    DB_AVAILABLE = True
+except ImportError:
+    DB_AVAILABLE = False
+    def db_write_audit(ip, action, score, reason=""): pass
+    def db_add_score_history(ip, score, action=""): pass
+    def db_get_stats(hours=24): return {"avg_score": 0}
+
 # ─────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────
@@ -41,9 +51,11 @@ TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 AUTH_LOG             = "/var/log/auth.log"
 STATE_FILE           = "/tmp/soc_detector_state.txt"
-AUDIT_LOG            = "/home/ubuntu/secops/audit_actions.csv"
-THREAT_PATTERNS_FILE = "/home/ubuntu/secops/threat_patterns.json"
-DIGEST_BUFFER_FILE   = "/home/ubuntu/secops/mail_digest_buffer.json"
+AUDIT_LOG              = "/home/ubuntu/secops/audit_actions.csv"
+THREAT_PATTERNS_FILE   = "/home/ubuntu/secops/threat_patterns.json"
+DIGEST_BUFFER_FILE     = "/home/ubuntu/secops/mail_digest_buffer.json"
+TELEGRAM_DIGEST_FILE   = "/home/ubuntu/secops/telegram_digest_buffer.json"
+THRESHOLD_ALERT_FILE   = "/tmp/soc_threshold_alert.json"
 WINDOW_MIN       = 15   # fenêtre d'analyse en minutes
 
 # Mode : "dryrun" = mail de confirmation, "auto" = ban immédiat
@@ -78,18 +90,84 @@ def is_report_running():
             pass
     return False
 
-def send_telegram(msg):
-    """Envoie une alerte Telegram si configuré."""
+def _telegram_post(msg):
+    """Envoi direct Telegram (interne)."""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
         return
     try:
         requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
             json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML"},
-            timeout=5
+            timeout=5,
         )
     except Exception as e:
         print(f"[Telegram] Erreur : {e}")
+
+def send_telegram(msg):
+    """Envoie ou bufferise un message Telegram selon le mode configuré (F16)."""
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    try:
+        with open("/home/ubuntu/secops/soc_config.json") as f:
+            cfg = json.load(f)
+        tg_mode = cfg.get("telegram_mode", "immediate")
+    except Exception:
+        tg_mode = "immediate"
+
+    if tg_mode == "digest":
+        # Bufferiser le message
+        buf = []
+        if os.path.exists(TELEGRAM_DIGEST_FILE):
+            try:
+                with open(TELEGRAM_DIGEST_FILE) as f:
+                    buf = json.load(f)
+            except Exception:
+                buf = []
+        buf.append({"ts": datetime.now().isoformat()[:16], "msg": msg})
+        with open(TELEGRAM_DIGEST_FILE, "w") as f:
+            json.dump(buf, f)
+    else:
+        _telegram_post(msg)
+
+def flush_telegram_digest():
+    """Vide le buffer Telegram digest et envoie un résumé groupé (F16)."""
+    if not os.path.exists(TELEGRAM_DIGEST_FILE):
+        return
+    try:
+        with open(TELEGRAM_DIGEST_FILE) as f:
+            buf = json.load(f)
+    except Exception:
+        return
+    if not buf:
+        return
+    try:
+        with open("/home/ubuntu/secops/soc_config.json") as f:
+            cfg = json.load(f)
+        interval_min = int(cfg.get("telegram_digest_interval", 30))
+    except Exception:
+        interval_min = 30
+
+    # Vérifie si l'intervalle est écoulé depuis le dernier flush
+    last_flush_file = "/tmp/soc_tg_last_flush.txt"
+    if os.path.exists(last_flush_file):
+        try:
+            with open(last_flush_file) as f:
+                last = datetime.fromisoformat(f.read().strip())
+            if (datetime.now() - last).total_seconds() < interval_min * 60:
+                return
+        except Exception:
+            pass
+
+    hostname = os.uname().nodename
+    lines = [f"📋 <b>Digest Telegram SOC — {hostname}</b> ({len(buf)} alertes)"]
+    for item in buf[-20:]:  # max 20 lignes
+        lines.append(f"[{item['ts'][11:]}] {item['msg'][:120]}")
+    _telegram_post("\n".join(lines))
+
+    with open(TELEGRAM_DIGEST_FILE, "w") as f:
+        json.dump([], f)
+    with open(last_flush_file, "w") as f:
+        f.write(datetime.now().isoformat())
 
 # ─────────────────────────────────────────
 # COLLECTE
@@ -186,13 +264,15 @@ def ban_ip_fail2ban(ip, jail="sshd"):
         return False
 
 def write_audit(ip, action, score, reason):
-    """Enregistre l'action dans le log d'audit CSV."""
+    """Enregistre dans CSV legacy + SQLite (F17)."""
     os.makedirs(os.path.dirname(AUDIT_LOG), exist_ok=True)
     header = not os.path.exists(AUDIT_LOG)
     with open(AUDIT_LOG, "a") as f:
         if header:
             f.write("timestamp,ip,action,score,reason\n")
         f.write(f"{datetime.now().isoformat()},{ip},{action},{score},{reason}\n")
+    if DB_AVAILABLE:
+        db_write_audit(ip, action, score, reason)
 
 def load_threat_patterns():
     """Charge le fichier de mémoire des patterns de menace."""
@@ -217,6 +297,13 @@ def update_threat_patterns(ip, action, score):
     patterns[ip]["score_max"] = max(patterns[ip].get("score_max", 0), score)
     patterns[ip]["actions"].append({"ts": datetime.now().isoformat()[:16], "action": action})
     patterns[ip]["actions"] = patterns[ip]["actions"][-10:]  # garder 10 dernières
+    # F15 — historique de scores (30 derniers)
+    if "score_history" not in patterns[ip]:
+        patterns[ip]["score_history"] = []
+    patterns[ip]["score_history"].append({"ts": datetime.now().isoformat()[:16], "score": score})
+    patterns[ip]["score_history"] = patterns[ip]["score_history"][-30:]
+    if DB_AVAILABLE:
+        db_add_score_history(ip, score, action)
 
     # Entrée par /24
     if subnet not in patterns:
@@ -368,6 +455,28 @@ def enrich_and_act(top_ips):
 
         abuse_score = info["score"]
         country     = info.get("country", "")
+
+        # F14 — Geo-blocking : ban immédiat si pays bloqué
+        try:
+            with open("/home/ubuntu/secops/soc_config.json") as _f:
+                _cfg = json.load(_f)
+            blocked_countries = [c.upper() for c in _cfg.get("blocked_countries", [])]
+        except Exception:
+            blocked_countries = []
+        if country and country.upper() in blocked_countries:
+            action = "BAN_GEO"
+            write_audit(ip, action, 100, f"Geo-block: pays {country} bloqué ({attempts} tentatives)")
+            if AUTO_BAN_MODE == "auto":
+                ban_ip_fail2ban(ip)
+                update_threat_patterns(ip, action, 100)
+            actions.append({"ip": ip, "action": action, "score": 100, "info": info,
+                            "reason": f"Geo-block {country}"})
+            send_telegram(
+                f"🌍 <b>BAN GEO</b>\nIP: <code>{ip}</code>\nPays bloqué: {country}\n"
+                f"Serveur: {hostname}"
+            )
+            print(f"[GeoBlock] {ip} ({country}) → BAN_GEO")
+            continue
 
         # F7 — TI check
         ti_result = check_ip_ti(ip)
@@ -955,6 +1064,8 @@ def main():
 
     check_subnet_auto_ban()
     check_low_slow()
+    check_composite_threshold()
+    flush_telegram_digest()
 
 def check_subnet_auto_ban():
     """Ban automatique d'un /24 si ≥ N IPs distinctes bannies dans la dernière heure."""
@@ -1072,6 +1183,44 @@ def check_low_slow():
         f"{lines}\n"
         f"Serveur: {hostname}"
     )
+
+
+def check_composite_threshold():
+    """F18 — Alerte si le score composite moyen des dernières 24h dépasse le seuil configuré."""
+    try:
+        with open("/home/ubuntu/secops/soc_config.json") as f:
+            cfg = json.load(f)
+        threshold = int(cfg.get("composite_avg_threshold", 0))
+    except Exception:
+        return
+    if threshold <= 0 or not DB_AVAILABLE:
+        return
+
+    stats = db_get_stats(hours=24)
+    avg = stats.get("avg_score", 0)
+    if avg < threshold:
+        return
+
+    # Déduplication : une alerte max par heure
+    if os.path.exists(THRESHOLD_ALERT_FILE):
+        try:
+            with open(THRESHOLD_ALERT_FILE) as f:
+                last = datetime.fromisoformat(json.load(f).get("last_alert", "2000-01-01"))
+            if (datetime.now() - last).total_seconds() < 3600:
+                return
+        except Exception:
+            pass
+
+    hostname = os.uname().nodename
+    msg = (
+        f"📊 <b>ALERTE SEUIL COMPOSITE</b>\n"
+        f"Score moyen 24h : <b>{avg:.1f}%</b> (seuil : {threshold}%)\n"
+        f"Bans : {stats['total_bans']} | Serveur : {hostname}"
+    )
+    _telegram_post(msg)
+    print(f"[ThresholdAlert] Score moyen {avg:.1f}% > seuil {threshold}%")
+    with open(THRESHOLD_ALERT_FILE, "w") as f:
+        json.dump({"last_alert": datetime.now().isoformat()}, f)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,13 @@ import json
 import requests
 from flask import Flask, request, jsonify, Response, stream_with_context
 from functools import wraps
+import sys
+sys.path.insert(0, os.path.dirname(__file__))
+try:
+    from soc_db import db_get_score_history, db_get_audit
+    DB_AVAILABLE = True
+except ImportError:
+    DB_AVAILABLE = False
 try:
     from flask_limiter import Limiter
     from flask_limiter.util import get_remote_address
@@ -792,6 +799,102 @@ def sse_stream():
             "X-Accel-Buffering": "no"
         }
     )
+
+# ─────────────────────────────────────────
+# F15 — Score history par IP
+# ─────────────────────────────────────────
+
+@app.route("/threat/ip", methods=["GET"])
+@require_key
+def threat_ip():
+    """Retourne le score history et le profil threat d'une IP (SQLite + threat_patterns.json)."""
+    ip = request.args.get("ip", "").strip()
+    if not ip:
+        return jsonify({"ok": False, "error": "Paramètre ip requis"}), 400
+
+    score_history = db_get_score_history(ip, limit=30) if DB_AVAILABLE else []
+
+    # Profil depuis threat_patterns.json (toujours disponible)
+    profile = {}
+    tp_file = "/home/ubuntu/secops/threat_patterns.json"
+    if os.path.exists(tp_file):
+        try:
+            with open(tp_file) as f:
+                patterns = json.load(f)
+            profile = patterns.get(ip, {})
+            subnet = ".".join(ip.split(".")[:3]) + ".0/24"
+            profile["subnet_info"] = patterns.get(subnet, {})
+        except Exception:
+            pass
+
+    # Dernières actions audit
+    audit = db_get_audit(ip=ip, limit=20) if DB_AVAILABLE else []
+
+    return jsonify({
+        "ok": True,
+        "ip": ip,
+        "score_history": score_history,
+        "profile": profile,
+        "audit": audit,
+    })
+
+
+# ─────────────────────────────────────────
+# F14 — Geo-blocking par pays
+# ─────────────────────────────────────────
+
+SOC_CONFIG = "/home/ubuntu/secops/soc_config.json"
+
+def _load_config():
+    try:
+        with open(SOC_CONFIG) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+def _save_config(cfg):
+    with open(SOC_CONFIG, "w") as f:
+        json.dump(cfg, f, indent=2, ensure_ascii=False)
+
+@app.route("/countries", methods=["GET"])
+@require_key
+def list_countries():
+    """Liste les pays actuellement bloqués."""
+    cfg = _load_config()
+    return jsonify({"ok": True, "blocked_countries": cfg.get("blocked_countries", [])})
+
+@app.route("/block/country", methods=["POST"])
+@require_key
+def block_country():
+    """Ajoute un code pays (ISO 2 lettres) à la liste de blocage."""
+    data = request.get_json(force=True) or {}
+    country = str(data.get("country", "")).strip().upper()
+    if not country or len(country) != 2 or not country.isalpha():
+        return jsonify({"ok": False, "error": "Code pays ISO 2 lettres requis (ex: CN)"}), 400
+    cfg = _load_config()
+    blocked = cfg.get("blocked_countries", [])
+    if country not in blocked:
+        blocked.append(country)
+        cfg["blocked_countries"] = blocked
+        _save_config(cfg)
+        print(f"[GeoBlock] Pays ajouté : {country}")
+    return jsonify({"ok": True, "blocked_countries": blocked})
+
+@app.route("/unblock/country", methods=["POST"])
+@require_key
+def unblock_country():
+    """Retire un pays de la liste de blocage."""
+    data = request.get_json(force=True) or {}
+    country = str(data.get("country", "")).strip().upper()
+    if not country:
+        return jsonify({"ok": False, "error": "Code pays requis"}), 400
+    cfg = _load_config()
+    blocked = [c for c in cfg.get("blocked_countries", []) if c != country]
+    cfg["blocked_countries"] = blocked
+    _save_config(cfg)
+    print(f"[GeoBlock] Pays retiré : {country}")
+    return jsonify({"ok": True, "blocked_countries": blocked})
+
 
 # ─────────────────────────────────────────
 # Main

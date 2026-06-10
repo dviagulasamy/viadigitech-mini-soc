@@ -1277,6 +1277,10 @@ tr:last-child td{{border-bottom:none}}
 .settings-title{{font-size:15px;font-weight:700;color:var(--text)}}
 .settings-section{{padding:16px 20px;border-bottom:1px solid var(--border)}}
 .settings-section-title{{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:12px}}
+.geo-preset-btn{{background:var(--bg);border:1px solid var(--border2);color:var(--muted);padding:4px 9px;border-radius:6px;font-size:11px;cursor:pointer;transition:all .15s}}
+.geo-preset-btn.active{{background:#450a0a;border-color:#dc2626;color:#fca5a5;font-weight:600}}
+.geo-tag{{display:inline-flex;align-items:center;gap:4px;background:#450a0a;border:1px solid #dc2626;color:#fca5a5;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:600}}
+.geo-tag button{{background:none;border:none;color:#fca5a5;cursor:pointer;padding:0 0 0 2px;font-size:13px;line-height:1}}
 .settings-row{{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:10px}}
 .settings-label{{font-size:13px;color:var(--text)}}
 .settings-sub{{font-size:11px;color:var(--muted)}}
@@ -1581,6 +1585,43 @@ body.ir-active .topbar{{margin-top:28px}}
       <input class="settings-input" id="cfg-subnet-threshold" type="number" min="2" max="10" value="3">
     </div>
   </div>
+  <!-- F14 — Geo-blocking -->
+  <div class="settings-section">
+    <div class="settings-section-title">🌍 Geo-blocking par pays (F14)</div>
+    <div class="settings-row">
+      <div><div class="settings-label">Seuil alerte composite (F18)</div><div class="settings-sub">Alerte Telegram si score moyen 24h ≥ seuil (0 = désactivé)</div></div>
+      <input class="settings-input" id="cfg-composite-threshold" type="number" min="0" max="100" value="0">
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-label">Digest Telegram</div><div class="settings-sub">Regrouper les alertes Telegram</div></div>
+      <select class="settings-input" id="cfg-telegram-mode" style="width:auto">
+        <option value="immediate">Immédiat</option>
+        <option value="digest">Digest</option>
+      </select>
+    </div>
+    <div class="settings-row">
+      <div><div class="settings-label">Intervalle digest (min)</div><div class="settings-sub">Délai entre deux envois groupés</div></div>
+      <input class="settings-input" id="cfg-telegram-digest-interval" type="number" min="5" max="1440" value="30">
+    </div>
+    <div class="settings-row" style="align-items:flex-start;flex-direction:column;gap:8px">
+      <div><div class="settings-label">Pays bloqués (code ISO)</div><div class="settings-sub">Toute IP de ces pays → BAN_GEO immédiat</div></div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px" id="geo-presets">
+        <button onclick="toggleGeoCountry('CN',this)" class="geo-preset-btn">🇨🇳 CN</button>
+        <button onclick="toggleGeoCountry('RU',this)" class="geo-preset-btn">🇷🇺 RU</button>
+        <button onclick="toggleGeoCountry('KP',this)" class="geo-preset-btn">🇰🇵 KP</button>
+        <button onclick="toggleGeoCountry('IR',this)" class="geo-preset-btn">🇮🇷 IR</button>
+        <button onclick="toggleGeoCountry('BY',this)" class="geo-preset-btn">🇧🇾 BY</button>
+        <button onclick="toggleGeoCountry('VN',this)" class="geo-preset-btn">🇻🇳 VN</button>
+        <button onclick="toggleGeoCountry('IN',this)" class="geo-preset-btn">🇮🇳 IN</button>
+        <button onclick="toggleGeoCountry('BR',this)" class="geo-preset-btn">🇧🇷 BR</button>
+      </div>
+      <div style="display:flex;gap:6px;width:100%">
+        <input class="settings-input" id="cfg-geo-country-input" type="text" maxlength="2" placeholder="Ex: US" style="width:70px;text-transform:uppercase">
+        <button onclick="addGeoCountryManual()" class="btn-primary" style="font-size:11px;padding:4px 10px">+ Ajouter</button>
+      </div>
+      <div id="cfg-geo-tags" style="display:flex;flex-wrap:wrap;gap:4px;min-height:28px"></div>
+    </div>
+  </div>
   <div class="settings-section">
     <div class="settings-section-title">Maintenance</div>
     <div class="settings-row">
@@ -1673,6 +1714,7 @@ body.ir-active .topbar{{margin-top:28px}}
     <button onclick="closeDrawer()" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer">✕</button>
   </div>
   <div class="nav-drawer-item active" onclick="showScreen('overview');closeDrawer()"    id="dnav-overview">🏠 Vue globale</div>
+  <div class="nav-drawer-item"        onclick="showScreen('ia');closeDrawer()"          id="dnav-ia">🤖 IA &amp; Prédictive</div>
   <div class="nav-drawer-item"        onclick="showScreen('security');closeDrawer()"    id="dnav-security">🔒 Sécurité</div>
   <div class="nav-drawer-item"        onclick="showScreen('performance');closeDrawer()" id="dnav-performance">📈 Performance</div>
   <div class="nav-drawer-item"        onclick="showScreen('timeline');closeDrawer()"    id="dnav-timeline">🕒 Timeline</div>
@@ -1688,6 +1730,7 @@ body.ir-active .topbar{{margin-top:28px}}
   <button class="hamburger" onclick="openDrawer()">☰</button>
   <div class="topbar-brand">🛡️ <span>ViaDigiTech SOC</span></div>
   <div class="nav-item active" onclick="showScreen('overview')"    id="nav-overview">Vue globale</div>
+  <div class="nav-item"        onclick="showScreen('ia')"          id="nav-ia">IA</div>
   <div class="nav-item"        onclick="showScreen('security')"    id="nav-security">Sécurité</div>
   <div class="nav-item"        onclick="showScreen('performance')" id="nav-performance">Performance</div>
   <div class="nav-item"        onclick="showScreen('timeline')"    id="nav-timeline">Timeline</div>
@@ -1737,6 +1780,10 @@ body.ir-active .topbar{{margin-top:28px}}
     <div class="bn-item" onclick="showScreen('infra')"       id="bn-infra">
       <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
       Infra
+    </div>
+    <div class="bn-item" onclick="showScreen('ia')"          id="bn-ia">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"/></svg>
+      IA
     </div>
   </div>
 </nav>
@@ -1847,15 +1894,17 @@ body.ir-active .topbar{{margin-top:28px}}
     </div>
   </div>
 
-  <!-- IA -->
-  <div style="margin-bottom:14px">{ai_html}</div>
-
   <!-- Graphique 7 jours -->
   <div class="card" style="margin-bottom:14px">
     <h2>Activité — 7 derniers jours</h2>
     <div id="histChart" style="height:240px;width:100%"></div>
   </div>
 
+</div>
+
+<!-- ═══════════ ÉCRAN IA : INTELLIGENCE ARTIFICIELLE ═══════════ -->
+<div class="screen" id="screen-ia">
+  <div style="margin-bottom:14px">{ai_html}</div>
 </div>
 
 <!-- ═══════════ ÉCRAN 2 : SÉCURITÉ ═══════════ -->
@@ -2028,6 +2077,12 @@ body.ir-active .topbar{{margin-top:28px}}
       <h2>Historique des actions</h2>
       <div class="table-wrap"><table id="wb-history-table"><thead><tr><th>Heure</th><th>Action</th><th>Score</th></tr></thead><tbody id="wb-history"></tbody></table></div>
     </div>
+  </div>
+  <!-- F15 — Évolution du score composite -->
+  <div class="card" style="margin-bottom:14px">
+    <h2>Évolution du score composite (F15)</h2>
+    <div id="wb-score-chart" style="height:180px;width:100%"></div>
+    <div id="wb-score-empty" style="display:none;color:#475569;font-size:12px;text-align:center;padding:40px 0">Aucun historique de score pour cette IP</div>
   </div>
   <div class="card" style="margin-bottom:14px">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -2366,6 +2421,12 @@ async function loadSettingsFromServer(){{
     if(el('cfg-mail-honeypot'))el('cfg-mail-honeypot').checked=cfg.mail_types_honeypot!==false;
     if(el('cfg-mail-low-slow'))el('cfg-mail-low-slow').checked=cfg.mail_types_low_slow!==false;
     if(el('cfg-mail-system'))el('cfg-mail-system').checked=cfg.mail_types_system!==false;
+    // F14 — Geo-blocking + F16/F18
+    if(el('cfg-composite-threshold'))el('cfg-composite-threshold').value=cfg.composite_avg_threshold||0;
+    if(el('cfg-telegram-mode'))el('cfg-telegram-mode').value=cfg.telegram_mode||'immediate';
+    if(el('cfg-telegram-digest-interval'))el('cfg-telegram-digest-interval').value=cfg.telegram_digest_interval||30;
+    renderGeoTags(cfg.blocked_countries||[]);
+    updateGeoPresets(cfg.blocked_countries||[]);
     updateOncallBadge(!!cfg.oncall);
     applyAutologout();
   }}catch(e){{}}
@@ -2398,7 +2459,11 @@ async function saveSettings(){{
     mail_types_ban_temp:el('cfg-mail-ban-temp')?.checked!==false,
     mail_types_honeypot:el('cfg-mail-honeypot')?.checked!==false,
     mail_types_low_slow:el('cfg-mail-low-slow')?.checked!==false,
-    mail_types_system:el('cfg-mail-system')?.checked!==false
+    mail_types_system:el('cfg-mail-system')?.checked!==false,
+    composite_avg_threshold:parseInt(el('cfg-composite-threshold')?.value||0),
+    telegram_mode:el('cfg-telegram-mode')?.value||'immediate',
+    telegram_digest_interval:parseInt(el('cfg-telegram-digest-interval')?.value||30),
+    blocked_countries:_geoCountries
   }};
   try{{
     const r=await fetch('/action/config',{{method:'POST',headers:{{'Content-Type':'application/json','X-SOC-Key':key}},body:JSON.stringify(payload)}});
@@ -2410,6 +2475,42 @@ async function saveSettings(){{
 function saveSettingsLive(){{
   const oncall=document.getElementById('cfg-oncall')?.checked||false;
   updateOncallBadge(oncall);
+}}
+
+// ── F14 — Geo-blocking ──
+let _geoCountries=[];
+function renderGeoTags(countries){{
+  _geoCountries=[...countries];
+  const container=document.getElementById('cfg-geo-tags');
+  if(!container)return;
+  container.innerHTML=_geoCountries.map(c=>
+    `<span class="geo-tag">${{c}}<button onclick="removeGeoCountry('${{c}}')" title="Retirer">×</button></span>`
+  ).join('');
+}}
+function updateGeoPresets(countries){{
+  document.querySelectorAll('.geo-preset-btn').forEach(btn=>{{
+    const code=btn.textContent.split(' ')[1];
+    btn.classList.toggle('active',countries.includes(code));
+  }});
+}}
+function toggleGeoCountry(code,btn){{
+  const idx=_geoCountries.indexOf(code);
+  if(idx>=0){{_geoCountries.splice(idx,1);btn.classList.remove('active');}}
+  else{{_geoCountries.push(code);btn.classList.add('active');}}
+  renderGeoTags(_geoCountries);
+  updateGeoPresets(_geoCountries);
+}}
+function removeGeoCountry(code){{
+  _geoCountries=_geoCountries.filter(c=>c!==code);
+  renderGeoTags(_geoCountries);
+  updateGeoPresets(_geoCountries);
+}}
+function addGeoCountryManual(){{
+  const input=document.getElementById('cfg-geo-country-input');
+  const code=(input?.value||'').trim().toUpperCase();
+  if(code.length!==2||!code.match(/^[A-Z]{{2}}$/)){{showToast('Code ISO 2 lettres requis (ex: US)',false);return;}}
+  if(!_geoCountries.includes(code)){{_geoCountries.push(code);renderGeoTags(_geoCountries);updateGeoPresets(_geoCountries);}}
+  if(input)input.value='';
 }}
 function updateOncallBadge(on){{
   const b=document.getElementById('oncall-badge');
@@ -3040,7 +3141,48 @@ function openWorkbench(ip){{
   document.getElementById('wb-geo').innerHTML='N/A';
   document.getElementById('nav-workbench').style.display='block';
   showScreen('workbench');
+  // F15 — Charger et afficher le score history
+  loadWbScoreHistory(ip);
 }}
+
+// F15 — Sparkline historique score composite
+let _wbScoreChart=null;
+async function loadWbScoreHistory(ip){{
+  const chartEl=document.getElementById('wb-score-chart');
+  const emptyEl=document.getElementById('wb-score-empty');
+  if(!chartEl)return;
+  chartEl.style.display='block';
+  emptyEl.style.display='none';
+  const key=sessionStorage.getItem('soc_key')||'';
+  if(!key)return;
+  try{{
+    const r=await fetch('/action/threat/ip?ip='+encodeURIComponent(ip),{{headers:{{'X-SOC-Key':key}}}});
+    const d=await r.json();
+    const history=(d.score_history||[]);
+    if(!history.length){{chartEl.style.display='none';emptyEl.style.display='block';return;}}
+    const labels=history.map(h=>h.ts.slice(11,16));
+    const scores=history.map(h=>h.score);
+    const actions=history.map(h=>h.action);
+    if(_wbScoreChart){{_wbScoreChart.dispose();_wbScoreChart=null;}}
+    _wbScoreChart=echarts.init(chartEl,null,{{renderer:'canvas'}});
+    _wbScoreChart.setOption({{
+      backgroundColor:'transparent',
+      grid:{{top:20,bottom:30,left:40,right:10}},
+      xAxis:{{type:'category',data:labels,axisLabel:{{fontSize:9,color:'#64748b'}},axisLine:{{lineStyle:{{color:'#1e2942'}}}}}},
+      yAxis:{{type:'value',min:0,max:100,axisLabel:{{fontSize:9,color:'#64748b',formatter:'{{value}}%'}},splitLine:{{lineStyle:{{color:'#1e2942'}}}}}},
+      tooltip:{{trigger:'axis',formatter:p=>p[0].name+' — Score: '+p[0].value+'%<br>'+actions[p[0].dataIndex]}},
+      series:[{{
+        type:'line',data:scores,smooth:true,
+        lineStyle:{{color:'#6366f1',width:2}},
+        itemStyle:{{color:function(p){{return p.data>=80?'#ef4444':p.data>=70?'#f59e0b':'#6366f1';}}}},
+        areaStyle:{{color:{{type:'linear',x:0,y:0,x2:0,y2:1,colorStops:[{{offset:0,color:'rgba(99,102,241,0.3)'}},{{offset:1,color:'rgba(99,102,241,0)'}}]}}}},
+        markLine:{{silent:true,data:[
+          {{yAxis:80,lineStyle:{{color:'#ef4444',type:'dashed'}},label:{{formatter:'BAN AUTO',color:'#ef4444'}}}},
+          {{yAxis:70,lineStyle:{{color:'#f59e0b',type:'dashed'}},label:{{formatter:'BAN TEMP',color:'#f59e0b'}}}}
+        ]}}
+      }}]
+    }});
+  }}catch(e){{chartEl.style.display='none';emptyEl.style.display='block';}}}}
 function wbAnalyze(){{
   if(!_wbIp)return;
   const btn=document.getElementById('wb-analyze-btn');
@@ -3091,24 +3233,38 @@ renderAnnotations();
       if(el)el.classList.remove('skeleton');
     }});
   }}
-  const src=new EventSource('/action/stream?key='+encodeURIComponent(key));
-  src.onmessage=function(e){{
-    try{{
-      const d=JSON.parse(e.data);
-      applySkeleton();
-      setTimeout(()=>{{
-        const cpuEl=document.getElementById('live-cpu');
-        const ramEl=document.getElementById('live-ram');
-        const banEl=document.getElementById('live-bans');
-        if(cpuEl){{cpuEl.textContent=d.cpu+'%';}}
-        if(ramEl){{ramEl.textContent=d.ram+'%';}}
-        if(banEl){{banEl.textContent=d.bans;}}
-        clearSkeleton();
-        setDot('dot-sse',true);
-      }},320);
-    }}catch(err){{clearSkeleton();}}
-  }};
-  src.onerror=function(){{clearSkeleton();setDot('dot-sse',false);src.close();}};
+  // F20 — SSE avec Page Visibility API (économie batterie mobile)
+  let _sseSource=null;
+  function connectSSE(){{
+    if(_sseSource){{_sseSource.close();_sseSource=null;}}
+    _sseSource=new EventSource('/action/stream?key='+encodeURIComponent(key));
+    _sseSource.onmessage=function(e){{
+      try{{
+        const d=JSON.parse(e.data);
+        applySkeleton();
+        setTimeout(()=>{{
+          const cpuEl=document.getElementById('live-cpu');
+          const ramEl=document.getElementById('live-ram');
+          const banEl=document.getElementById('live-bans');
+          if(cpuEl)cpuEl.textContent=d.cpu+'%';
+          if(ramEl)ramEl.textContent=d.ram+'%';
+          if(banEl)banEl.textContent=d.bans;
+          clearSkeleton();
+          setDot('dot-sse',true);
+        }},320);
+      }}catch(err){{clearSkeleton();}}
+    }};
+    _sseSource.onerror=function(){{clearSkeleton();setDot('dot-sse',false);_sseSource.close();_sseSource=null;}};
+  }}
+  document.addEventListener('visibilitychange',function(){{
+    if(document.hidden){{
+      if(_sseSource){{_sseSource.close();_sseSource=null;}}
+      setDot('dot-sse',false);
+    }}else{{
+      connectSSE();
+    }}
+  }});
+  connectSSE();
 }})();
 
 // ── Theme toggle ──
