@@ -1,21 +1,23 @@
-# ViaDigiTech Mini-SOC IA — V10.2
+# ViaDigiTech Mini-SOC IA — V11.0
 
-> Plateforme SOAR autonome pour VPS/cloud : détection temps réel, scoring multi-facteurs, Threat Intelligence, honeypot SSH, analyse IA prédictive, dashboard SecOps premium et rapports automatiques.
+> Plateforme SOAR autonome pour VPS/cloud : détection temps réel, geo-blocking, scoring composite multi-facteurs, Threat Intelligence, honeypot SSH, analyse IA prédictive, dashboard SecOps premium et rapports automatiques.
 
 ---
 
 ## Description
 
-**ViaDigiTech Mini-SOC V10.0** est une plateforme SecOps complète tournant sur un VPS Ubuntu 22.04.  
-Elle surveille en continu l'état du serveur, analyse les attaques SSH, croise les IPs contre des feeds de Threat Intelligence, calcule un score composite multi-facteurs, applique une réponse graduée (BAN_TEMP / BAN_AUTO), et génère des alertes Telegram + rapports email HTML enrichis.
+**ViaDigiTech Mini-SOC V11.0** est une plateforme SecOps complète tournant sur un VPS Ubuntu 22.04.  
+Elle surveille en continu l'état du serveur, analyse les attaques SSH, bloque les pays à risque (geo-blocking), croise les IPs contre des feeds de Threat Intelligence, calcule un score composite multi-facteurs, applique une réponse graduée (BAN_GEO / BAN_AUTO / BAN_TEMP), persiste les données en SQLite et génère des alertes Telegram + rapports email HTML enrichis.
 
 ---
 
 ## Fonctionnalités
 
 ### Détection & réponse
+- **Geo-blocking** (F14) : blocage immédiat (BAN_GEO) par code pays ISO — configurable depuis le dashboard
 - **Scoring composite multi-facteurs** (F8) : AbuseIPDB (base) + TI feeds (+25) + récidive (+4/10/15) + pays à risque (+4/8) + heure nocturne/WE (+5)
 - **Réponse graduée** (F9) : composite ≥ 80 → BAN_AUTO, 70-79 → BAN_TEMP, 40-69 → Ollama, <40 → SURVEILLE
+- **Alerte seuil composite** (F18) : notification Telegram si le score moyen 24h dépasse un seuil configurable
 - **Threat Intelligence** (F7) : Feodo Tracker (botnets C2) + AlienVault OTX (optionnel), cache 1h
 - **Honeypot SSH** (F3) : port 2222 — ban immédiat + alerte Telegram 🍯
 - **Détection Low & Slow** (F4) : 10-200 tentatives/24h sous le radar Fail2Ban
@@ -26,21 +28,22 @@ Elle surveille en continu l'état du serveur, analyse les attaques SSH, croise l
 - **IA prédictive** (F6) : chaque lundi, analyse patterns de la semaine → tendances, vecteurs émergents, 3 recommandations
 - **Rapport hebdomadaire** (F5) : bilan 7j vs semaine précédente, top IPs géolocalisées, analyse IA
 
-### Dashboard V10 (6 écrans)
+### Dashboard V11 (7 écrans)
 - **Login premium** (V7) : glassmorphism, orbes CSS animées, shield SVG pulsant
 - **Vue globale** : jauge SVG radiale 270° animée (V2), compteurs incrémentaux (V3), sparklines gradient fill (V9)
+- **IA & Prédictive** (F19) : écran dédié — 4 onglets Synthèse / Sécurité / Performance / 🔮 Prédictive
 - **Mode IR dramatisé** (V8) : bannière rouge défilante + irBodyPulse, playbooks interactifs (F13)
-- **Playbooks IR** (F13) : 3 scénarios (Brute-force / Recon / Compromission) avec checkboxes + rapport clipboard
+- **Workbench IP** : profil complet + sparkline score composite 30j (F15) + analyse IA + historique
 - **Heatmap interactive** (V6) : tooltips riches avec niveau de sévérité coloré au survol
 - **Timeline verticale redesign** (V4) : ligne connectrice colorée, marqueurs circulaires, glow critiques
-- **Onglet IA Prédictive** (F6) : tendances, vecteurs émergents, 3 recommandations numérotées
-- **Badges TI** (F7) : 🦠 sur chaque IP matchée dans les feeds
 - **ASN agressifs** (F10) : carte top 6 ASN + bouton blocage
 - **Skeleton loading** (V5) : shimmer CSS sur les stats pendant les updates SSE
 - **Export SIEM/CEF** (F12) : `/action/export/siem?format=json|cef`
+- **SSE mobile optimisé** (F20) : pause automatique en arrière-plan via Page Visibility API
 
 ### Alertes & rapports
-- **Telegram** : BAN_AUTO 🚨, BAN_TEMP ⚠️, Honeypot 🍯, Low&Slow 🐢, BAN_SUBNET24
+- **Telegram** : BAN_GEO 🌍, BAN_AUTO 🚨, BAN_TEMP ⚠️, Honeypot 🍯, Low&Slow 🐢, BAN_SUBNET24
+- **Digest Telegram** (F16) : regroupement configurable des alertes Telegram (immédiat ou digest)
 - **Rapport quotidien** (7h) : HTML dark mode, sujet dynamique par niveau de menace
 - **Rapport hebdomadaire** (vendredi 8h) : bilan, sparkbars, comparatif S-1
 - **Rapport mensuel** (1er du mois) : top /24, comparatif M-1
@@ -51,9 +54,10 @@ Elle surveille en continu l'état du serveur, analyse les attaques SSH, croise l
 
 | Composant | Rôle |
 |-----------|------|
-| `detector.py` | SOAR core : scoring composite, réponse graduée, TI, low&slow, subnet ban |
-| `dashboard.py` | Dashboard HTML V10 — 6 écrans, login glassmorphism, IR playbooks, ASN, SIEM |
-| `actions.py` | API Flask port 8022 — 19 endpoints, rate limiting, export SIEM, blocage ASN |
+| `detector.py` | SOAR core : geo-blocking F14, scoring composite F8, réponse graduée F9, TI F7, low&slow F4, subnet ban, threshold alert F18, digest Telegram F16 |
+| `dashboard.py` | Dashboard HTML V11 — 7 écrans, écran IA F19, workbench sparkline F15, SSE mobile F20, settings geo F14 |
+| `actions.py` | API Flask port 8022 — 25 endpoints, /threat/ip F15, /block/country F14 |
+| `soc_db.py` | **Nouveau** — SQLite F17 : audit_actions, score_history, threat_patterns, migration transparente |
 | `ti_feeds.py` | Threat Intelligence — Feodo Tracker + OTX, cache TTL 1h |
 | `predict_ai.py` | Analyse prédictive IA lundi → last_ai_summary.json["predictive"] |
 | `honeypot.py` | Honeypot TCP port 2222 — ban immédiat (systemd) |
@@ -65,6 +69,7 @@ Elle surveille en continu l'état du serveur, analyse les attaques SSH, croise l
 | Ollama `qwen2.5:3b` | LLM local pour analyses SOC |
 | Fail2Ban | Bannissement SSH progressif |
 | Nginx Proxy Manager | Reverse proxy Docker |
+| **SQLite** | Persistance audit_actions + score_history (WAL mode) |
 
 ---
 
@@ -73,9 +78,10 @@ Elle surveille en continu l'état du serveur, analyse les attaques SSH, croise l
 ```
 viadigitech-mini-soc/
 ├── scripts/
-│   ├── detector.py          # SOAR core — scoring composite + TI + low&slow
-│   ├── dashboard.py         # Dashboard V10 — login, IR, playbooks, ASN, SIEM
-│   ├── actions.py           # API Flask 19 endpoints
+│   ├── detector.py          # SOAR core — geo-blocking, scoring, TI, low&slow
+│   ├── dashboard.py         # Dashboard V11 — 7 écrans, IA screen, workbench sparkline
+│   ├── actions.py           # API Flask 25 endpoints
+│   ├── soc_db.py            # SQLite F17 — audit + score history + threat patterns
 │   ├── ti_feeds.py          # TI feeds (Feodo + OTX)
 │   ├── honeypot.py          # Honeypot port 2222
 │   ├── soc_healthcheck.py   # Health-check SOC
@@ -87,12 +93,11 @@ viadigitech-mini-soc/
 ├── systemd/
 │   ├── soc-actions.service  # Service API Flask
 │   └── soc-honeypot.service # Service honeypot
-├── docs/
-│   └── ...                  # Archives versions précédentes
+├── docs/                    # Archives versions précédentes
 ├── cron/                    # Configuration crontab
 ├── legacy/                  # Anciens scripts bash
 ├── INSTALL.md               # Procédure d'installation
-├── PROJECT_STATE.md         # État technique complet V10
+├── PROJECT_STATE.md         # État technique complet V11
 └── README.md
 ```
 
@@ -153,17 +158,18 @@ sudo systemctl enable --now soc-actions soc-honeypot
 
 ---
 
-## Roadmap complétée (4 sprints)
+## Historique des versions
 
-| Sprint | Items |
-|--------|-------|
-| **Sprint 1** | Typographie JetBrains Mono, compteurs animés, transitions, Telegram, health-check |
+| Version | Items |
+|---------|-------|
+| **Sprint 1** | Typographie, compteurs animés, transitions, Telegram, health-check |
 | **Sprint 2** | Jauge SVG 270°, timeline verticale, login glassmorphism, honeypot SSH, low&slow |
 | **Sprint 3** | TI feeds, scoring adaptatif, réponse graduée, rapport hebdo, IA prédictive |
 | **Sprint 4** | Skeleton loading, heatmap tooltips, IR dramatisé, sparklines gradient, ASN blocking, export SIEM, playbooks IR |
 | **Post-Sprint** | Notification bell, digest email configurable, filtres mail par type |
-| **V10.2** | Redirect graph.viadigitech.com → /soc/, topbar mobile responsive |
+| **V10.2** | Redirect graph.viadigitech.com, topbar mobile responsive, fix DOM workbench |
+| **V11.0** | Geo-blocking F14, score history F15, digest Telegram F16, SQLite F17, alertes seuil F18, écran IA F19, SSE mobile F20 |
 
 ---
 
-*ViaDigiTech Mini-SOC — V10.2 — 10 juin 2026*
+*ViaDigiTech Mini-SOC — V11.0 — 10 juin 2026*
