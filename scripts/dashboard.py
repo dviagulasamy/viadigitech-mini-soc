@@ -2006,6 +2006,7 @@ body.ir-active .topbar{{margin-top:28px}}
     </div>
     <div id="live-logs" style="font-family:monospace;font-size:11px;color:#94a3b8;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;max-height:240px;overflow-y:auto;white-space:pre-wrap;word-break:break-all">Chargement...</div>
   </div>
+</div>
 <!-- ═══════════ ÉCRAN 6 : WORKBENCH IP ═══════════ -->
 <div class="screen" id="screen-workbench">
   <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
@@ -2540,9 +2541,10 @@ function showScreen(id){{
   document.querySelectorAll('.nav-item,.bn-item,.nav-drawer-item').forEach(n=>n.classList.remove('active'));
   const el=document.getElementById('screen-'+id);
   if(el){{el.style.animation='none';void el.offsetWidth;el.style.animation='';el.classList.add('active');}}
-  const di=document.getElementById('nav-'+id);   if(di)di.classList.add('active');
-  const bi=document.getElementById('bn-'+id);    if(bi)bi.classList.add('active');
-  const ddi=document.getElementById('dnav-'+id); if(ddi)ddi.classList.add('active');
+  const navId=id==='workbench'?'security':id;
+  const di=document.getElementById('nav-'+navId);   if(di)di.classList.add('active');
+  const bi=document.getElementById('bn-'+navId);    if(bi)bi.classList.add('active');
+  const ddi=document.getElementById('dnav-'+navId); if(ddi)ddi.classList.add('active');
   if(id==='security'&&window._leafletMap) setTimeout(()=>window._leafletMap.invalidateSize(),50);
   if(id==='performance') setTimeout(()=>window.dispatchEvent(new Event('resize')),50);
   if(id==='overview'){{setTimeout(animateCounters,50);setTimeout(animateGauge,80);}}
