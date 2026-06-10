@@ -11,3 +11,19 @@ __pycache__/
 
 # Secrets / configuration locale
 .env
+.env.local
+.env.production
+
+# Crontab réelle (contient des secrets en production)
+cron/crontab-ubuntu-real.txt
+cron/crontab-root-real.txt
+
+# Fichiers de données SOC (IPs, patterns, cache)
+secops/threat_patterns.json
+secops/geo_cache.json
+secops/last_ai_summary.json
+secops/audit_actions.csv
+secops/mail_digest_buffer.json
+
+# Config système (contient Telegram, clés)
+/etc/soc-actions.env

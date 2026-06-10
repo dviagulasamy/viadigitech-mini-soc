@@ -25,8 +25,8 @@ import requests
 # CONFIG
 # ─────────────────────────────────────────
 LOCK_FILE     = "/tmp/report_daily.lock"
-MAIL_FROM     = os.environ.get("SOC_MAIL_FROM", "secops@viadigitech.com")
-MAIL_TO       = os.environ.get("SOC_MAIL_TO", "david@viadigitech.com").split(",")
+MAIL_FROM     = os.environ.get("SOC_MAIL_FROM", "secops@yourdomain.com")
+MAIL_TO       = os.environ.get("SOC_MAIL_TO", "admin@yourdomain.com").split(",")
 DASHBOARD_URL = "http://graph.viadigitech.com/soc/"
 OLLAMA_URL    = "http://localhost:11434/api/generate"
 OLLAMA_MODEL  = "qwen2.5:3b"

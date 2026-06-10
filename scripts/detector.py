@@ -34,8 +34,8 @@ except ImportError:
 # ─────────────────────────────────────────
 # CONFIG
 # ─────────────────────────────────────────
-MAIL_FROM        = os.environ.get("SOC_MAIL_FROM", "secops@viadigitech.com")
-MAIL_TO          = os.environ.get("SOC_MAIL_TO", "david@viadigitech.com").split(",")
+MAIL_FROM        = os.environ.get("SOC_MAIL_FROM", "secops@yourdomain.com")
+MAIL_TO          = os.environ.get("SOC_MAIL_TO", "admin@yourdomain.com").split(",")
 ABUSEIPDB_KEY    = os.environ.get("ABUSEIPDB_KEY", "")
 TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
@@ -59,8 +59,9 @@ SEUILS = {
     "disk_percent": 90,    # Disque %
 }
 
-# Whitelist IP — jamais alertées
-WHITELIST = ["176.134.132.129"]
+# Whitelist IP — chargée depuis SOC_WHITELIST ou soc_config.json (jamais en dur dans le code)
+_wl_env = os.environ.get("SOC_WHITELIST", "")
+WHITELIST = [ip.strip() for ip in _wl_env.split(",") if ip.strip()] if _wl_env else []
 
 # ─────────────────────────────────────────
 # CONCURRENCE OLLAMA

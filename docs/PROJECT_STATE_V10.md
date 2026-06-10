@@ -161,7 +161,7 @@ auth.log → parse SSH fails → AbuseIPDB score
 | UFW | ports sensibles bloqués |
 | Fail2Ban | bantime progressif, permanent récidivistes, maxretry 3 |
 | SSH | MaxAuthTries 3, LoginGraceTime 30, PermitRootLogin no |
-| Whitelist | 176.134.132.129 |
+| Whitelist | Chargée depuis SOC_WHITELIST (env var) |
 | Honeypot | port 2222 → ban immédiat |
 | API | clé X-SOC-Key, rate limiting 60 req/min |
 | Dashboard | SHA-256 côté client |

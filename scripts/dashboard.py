@@ -9,6 +9,7 @@ import os
 import json
 import subprocess
 import urllib.request
+from html import escape as _he
 from datetime import datetime, timedelta
 from collections import Counter, defaultdict
 import re
@@ -549,7 +550,7 @@ def build_html():
         try:
             for _line in open(_env_path):
                 _line = _line.strip()
-                if _line.startswith("SOC_DASHBOARD_PWD=your_dashboard_password_here
+                if _line.startswith("SOC_DASHBOARD_PWD="):
                     _pwd = _line.split("=", 1)[1].strip()
                     break
         except Exception:
@@ -689,8 +690,9 @@ def build_html():
         is_banned = "🔴" if ip in banned_ips else "🟡"
         geo = geo_data.get(ip, {})
         loc = f"<span style='color:#475569;font-size:10px;margin-left:6px'>{geo.get('cc','')} {geo.get('city','')}</span>" if geo else ""
-        btn = f"""<button onclick="banIP('{ip}')" class="btn-danger">Bannir</button>""" if ACTIONS_KEY else ""
-        ip_link = f"<span onclick=\"openWorkbench('{ip}')\" style=\"cursor:pointer;color:#a5b4fc;text-decoration:underline dotted\">{ip}</span>"
+        ip_safe = _he(ip, quote=True)
+        btn = f"""<button onclick="banIP('{ip_safe}')" class="btn-danger">Bannir</button>""" if ACTIONS_KEY else ""
+        ip_link = f"<span onclick=\"openWorkbench('{ip_safe}')\" style=\"cursor:pointer;color:#a5b4fc;text-decoration:underline dotted\">{ip_safe}</span>"
         # Badge TI si IP connue dans les feeds
         ti_badge = ""
         if ip in ti_matches:
@@ -760,8 +762,9 @@ def build_html():
         else:
             badge = f"<span class='badge badge-gray'>{action}</span>"
             atype = "other"
-        unban_btn = f"""<button onclick="unbanIP('{ip}')" class="btn-success">Débannir</button>""" if ACTIONS_KEY and "BAN" in action else ""
-        audit_html += f"<tr data-ip='{ip}' data-type='{atype}'><td style='color:#64748b;font-size:11px;white-space:nowrap'>{ts}</td><td style='font-family:monospace;font-size:11px'>{ip}</td><td>{badge}{unban_btn}</td><td style='text-align:right;color:#f59e0b;font-size:12px'>{score}%</td></tr>"
+        ip_safe2 = _he(ip, quote=True)
+        unban_btn = f"""<button onclick="unbanIP('{ip_safe2}')" class="btn-success">Débannir</button>""" if ACTIONS_KEY and "BAN" in action else ""
+        audit_html += f"<tr data-ip='{ip_safe2}' data-type='{atype}'><td style='color:#64748b;font-size:11px;white-space:nowrap'>{ts}</td><td style='font-family:monospace;font-size:11px'>{ip_safe2}</td><td>{badge}{unban_btn}</td><td style='text-align:right;color:#f59e0b;font-size:12px'>{score}%</td></tr>"
 
     # ── Containers ──
     containers_html = ""
@@ -848,8 +851,9 @@ def build_html():
     # ── Whitelist ──
     whitelist_html = ""
     for ip in whitelist:
-        rm_btn = f"""<button onclick="removeWhitelist('{ip}')" class="btn-danger" style="padding:1px 6px">Retirer</button>""" if ACTIONS_KEY else ""
-        whitelist_html += f"<tr><td style='font-family:monospace;font-size:12px'>{ip}</td><td style='text-align:right'>{rm_btn}</td></tr>"
+        ip_safe3 = _he(ip, quote=True)
+        rm_btn = f"""<button onclick="removeWhitelist('{ip_safe3}')" class="btn-danger" style="padding:1px 6px">Retirer</button>""" if ACTIONS_KEY else ""
+        whitelist_html += f"<tr><td style='font-family:monospace;font-size:12px'>{ip_safe3}</td><td style='text-align:right'>{rm_btn}</td></tr>"
 
     # ── Timeline HTML ──
     # ── Timeline verticale — marqueurs colorés avec ligne connectrice ──

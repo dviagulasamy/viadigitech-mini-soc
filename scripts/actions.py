@@ -8,6 +8,7 @@ Endpoints : /ban, /unban, /analyze, /report, /whitelist/add, /whitelist/remove, 
 import os
 import re
 import csv
+import hmac
 import subprocess
 import threading
 import time
@@ -71,13 +72,14 @@ def valid_ip(ip):
 # ─────────────────────────────────────────
 
 @app.route("/auth", methods=["POST"])
+@(_limiter.limit("5 per minute") if _limiter_ok else lambda f: f)
 def auth():
     """Valide le mot de passe de la mire de connexion (SOC_DASHBOARD_PWD)."""
     data = request.get_json(force=True) or {}
     pwd = str(data.get("password", ""))
     if not DASHBOARD_PWD:
         return jsonify({"ok": False, "error": "SOC_DASHBOARD_PWD non défini"}), 403
-    if pwd == DASHBOARD_PWD:
+    if hmac.compare_digest(pwd, DASHBOARD_PWD):
         return jsonify({"ok": True})
     return jsonify({"ok": False, "error": "Mot de passe invalide"}), 403
 
@@ -328,16 +330,17 @@ def load_soc_config():
         return dict(SOC_CONFIG_DEFAULTS)
 
 @app.route("/config", methods=["GET"])
+@require_key
 def get_config():
     """
     Lire la configuration SOC
     ---
     tags: [SOC]
+    security: [{ApiKeyAuth: []}]
     responses:
       200:
         description: Configuration courante
     """
-    # GET config est accessible sans clé (données non sensibles)
     return jsonify(load_soc_config())
 
 @app.route("/config", methods=["POST"])
@@ -393,15 +396,16 @@ SOC_HEALTH_FILE = "/home/ubuntu/secops/soc_health.json"
 
 @app.route("/health", methods=["GET"])
 def get_health():
-    """Retourne l'état de santé du SOC — pas d'auth requise."""
+    """Retourne l'état de santé minimal du SOC — pas d'auth requise (uptime check)."""
     if not os.path.exists(SOC_HEALTH_FILE):
-        return jsonify({"ok": False, "overall": "UNKNOWN", "error": "Health check non encore exécuté"})
+        return jsonify({"ok": False, "overall": "UNKNOWN"})
     try:
         with open(SOC_HEALTH_FILE) as f:
             data = json.load(f)
-        return jsonify({"ok": True, **data})
+        # Exposer uniquement le statut global, pas le détail des services
+        return jsonify({"ok": True, "overall": data.get("overall", "UNKNOWN"), "ts": data.get("ts", "")})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        return jsonify({"ok": False, "overall": "ERROR"}), 500
 
 
 @app.route("/notify/telegram", methods=["POST"])

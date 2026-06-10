@@ -83,7 +83,7 @@ tls            off
 logfile        /var/log/msmtp.log
 account        default
 host           smtp.<ton_relay>.ovh.net
-from           monitoring@viadigitech.com
+from           monitoring@yourdomain.com
 ```
 
 ---

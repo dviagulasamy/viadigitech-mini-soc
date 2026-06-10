@@ -14,8 +14,8 @@ from collections import Counter, defaultdict
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-MAIL_FROM   = os.environ.get("SOC_MAIL_FROM", "secops@viadigitech.com")
-MAIL_TO     = os.environ.get("SOC_MAIL_TO",   "david@viadigitech.com").split(",")
+MAIL_FROM   = os.environ.get("SOC_MAIL_FROM", "secops@yourdomain.com")
+MAIL_TO     = os.environ.get("SOC_MAIL_TO",   "admin@yourdomain.com").split(",")
 AUDIT_LOG   = "/home/ubuntu/secops/audit_actions.csv"
 OLLAMA_URL  = "http://localhost:11434/api/generate"
 DASHBOARD_URL = "http://graph.viadigitech.com/soc/"
