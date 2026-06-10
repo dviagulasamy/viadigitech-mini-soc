@@ -1022,7 +1022,7 @@ function askAIWithPrompt(p){{
 
     html = f"""<!DOCTYPE html>
 <html lang="fr"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>SOC — {hostname}</title>
 <link rel="manifest" href="/soc/manifest.json">
 <meta name="theme-color" content="#6366f1">
@@ -1171,24 +1171,68 @@ tr:last-child td{{border-bottom:none}}
 
 /* ── Mobile overrides ── */
 @media(max-width:768px){{
+  /* Topbar */
   .topbar{{padding:0 12px}}
   .nav-item{{display:none}}
   .topbar-hostname{{display:none}}
   .hamburger{{display:block}}
-  .topbar-right{{gap:6px}}
-  .threat-badge{{font-size:11px;padding:4px 9px}}
+  .topbar-right{{gap:4px;padding-left:6px}}
+  #status-bar{{display:none}}
+  .oncall-badge{{display:none}}
+  .age-indicator{{display:none}}
+  .threat-badge{{font-size:11px;padding:3px 7px}}
+  /* Panels slide-in — largeur adaptative */
+  .settings-panel{{width:min(320px,92vw)}}
+  .notif-panel{{width:min(360px,92vw)}}
+  /* Layout général */
   .main{{padding:12px;padding-bottom:88px}}
   .card{{padding:13px;border-radius:12px}}
   .stat-big{{font-size:26px}}
+  .stat-label{{font-size:12px}}
+  .stat-sub{{font-size:11px}}
+  h2{{font-size:12px}}
   #geomap{{height:280px}}
   .bottom-nav{{display:block}}
-  .btn-danger,.btn-success{{padding:8px 12px;min-height:38px}}
+  /* Boutons — touch targets 44px */
+  .btn-danger,.btn-success,.btn-primary{{padding:10px 14px;min-height:44px}}
   .search-input{{font-size:16px}}
-  #toast{{bottom:90px;right:12px;left:12px;text-align:center}}
+  #toast{{bottom:100px;right:12px;left:12px;text-align:center}}
+  /* Threat hero grid — stack vertical */
+  #threat-hero-grid{{grid-template-columns:1fr !important}}
+  .threat-hero{{width:100%}}
+  /* Heatmap — plus compact */
+  .heatmap-grid{{font-size:7px;gap:1px}}
+  .hm-cell{{height:16px !important}}
+  /* IR grid — 1 colonne */
+  .ir-grid{{grid-template-columns:1fr;padding:12px}}
+  .ir-grid>[style*="grid-column"]{{grid-column:1 !important}}
+  /* Playbook cards — pleine largeur */
+  .playbook-card{{min-width:calc(100% - 4px);flex-basis:100%}}
+  /* Login */
+  .login-box{{padding:32px 24px;max-width:90vw}}
+  /* Settings — sections email toggles 1 colonne */
+  #cfg-mail-types-grid{{grid-template-columns:1fr !important}}
 }}
 @media(max-width:480px){{
   .topbar-brand span{{display:none}}
-  .threat-badge{{font-size:10px;padding:4px 8px}}
+  .threat-badge{{font-size:10px;padding:3px 6px}}
+  /* Panels pleine largeur sur très petit écran */
+  .settings-panel{{width:100vw}}
+  .notif-panel{{width:100vw}}
+  /* Topbar droite — conserver uniquement l'essentiel */
+  #report-btn{{display:none}}
+  .ir-btn{{font-size:10px;padding:3px 7px}}
+  /* Toast au dessus bottom-nav */
+  #toast{{bottom:96px}}
+  /* Heatmap */
+  .heatmap-grid{{grid-template-columns:28px repeat(24,0.8fr)}}
+  /* IR overlay */
+  .ir-score-big{{font-size:52px;letter-spacing:-3px;margin:12px 0}}
+  .ir-header{{padding:12px 16px}}
+  .ir-grid{{padding:10px}}
+  /* Topbar mode IR */
+  body.ir-active .topbar{{margin-top:26px}}
+  .ir-banner{{font-size:9px;letter-spacing:1.2px;padding:4px 8px}}
 }}
 /* ── Login overlay premium ── */
 .login-overlay{{display:none;position:fixed;inset:0;z-index:9000;flex-direction:column;align-items:center;justify-content:center;background:#020510;overflow:hidden}}
@@ -1221,7 +1265,7 @@ tr:last-child td{{border-bottom:none}}
 @keyframes loginShake{{0%,100%{{transform:translateX(0)}}25%{{transform:translateX(-8px)}}75%{{transform:translateX(8px)}}}}
 .login-box.shake{{animation:loginShake .3s ease}}
 /* ── Settings panel ── */
-.settings-panel{{position:fixed;top:0;right:0;width:320px;height:100vh;background:var(--bg2);border-left:1px solid var(--border);z-index:7000;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column;overflow-y:auto;box-shadow:-8px 0 32px rgba(0,0,0,.5)}}
+.settings-panel{{position:fixed;top:0;right:0;width:320px;height:100%;height:100dvh;background:var(--bg2);border-left:1px solid var(--border);z-index:7000;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column;overflow-y:auto;box-shadow:-8px 0 32px rgba(0,0,0,.5);padding-bottom:env(safe-area-inset-bottom)}}
 .settings-panel.open{{transform:translateX(0)}}
 .settings-overlay{{display:none;position:fixed;inset:0;z-index:6999;background:rgba(0,0,0,.4)}}
 .settings-overlay.open{{display:block}}
@@ -1247,7 +1291,7 @@ tr:last-child td{{border-bottom:none}}
 .notif-btn:hover{{border-color:var(--accent);color:var(--accent-light)}}
 .notif-badge{{position:absolute;top:-5px;right:-5px;min-width:16px;height:16px;background:#ef4444;color:#fff;border-radius:8px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 3px;line-height:1;display:none}}
 .notif-badge.visible{{display:flex}}
-.notif-panel{{position:fixed;top:0;right:0;width:360px;height:100vh;background:var(--bg2);border-left:1px solid var(--border);z-index:7000;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column;box-shadow:-8px 0 32px rgba(0,0,0,.5)}}
+.notif-panel{{position:fixed;top:0;right:0;width:360px;height:100%;height:100dvh;background:var(--bg2);border-left:1px solid var(--border);z-index:7000;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column;box-shadow:-8px 0 32px rgba(0,0,0,.5);padding-bottom:env(safe-area-inset-bottom)}}
 .notif-panel.open{{transform:translateX(0)}}
 .notif-panel-header{{padding:16px 20px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}}
 .notif-panel-title{{font-size:14px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px}}
@@ -1575,7 +1619,7 @@ body.ir-active .topbar{{margin-top:28px}}
     </div>
     <div style="margin-top:12px;margin-bottom:6px">
       <div class="settings-sub" style="margin-bottom:8px">Types d'alertes à recevoir par mail :</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      <div id="cfg-mail-types-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
         <label style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text);cursor:pointer">
           <label class="toggle" style="transform:scale(.8);transform-origin:left"><input type="checkbox" id="cfg-mail-ban-auto" checked><span class="toggle-slider"></span></label>
           <span style="color:#ef4444">🚨 Ban Auto</span>
@@ -1700,7 +1744,7 @@ body.ir-active .topbar{{margin-top:28px}}
 <div class="screen active" id="screen-overview">
 
   <!-- Hero : Threat Score + Stats -->
-  <div class="grid g2" style="margin-bottom:14px;grid-template-columns:280px 1fr">
+  <div class="grid g2" id="threat-hero-grid" style="margin-bottom:14px;grid-template-columns:280px 1fr">
     <!-- Threat Score Hero — Jauge SVG radiale 270° -->
     <div class="threat-hero card" id="threat-hero-card" style="background:{threat_bg};border-color:{threat_color};--tg-glow:{threat_color}22">
       <div style="font-size:10px;font-weight:700;color:{threat_color};letter-spacing:1.4px;text-transform:uppercase;opacity:.8;margin-bottom:2px">Score de menace</div>
