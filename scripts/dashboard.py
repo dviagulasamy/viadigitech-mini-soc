@@ -597,20 +597,20 @@ def build_html():
         _h_ko_str  = ", ".join(_h_ko) if _h_ko else ""
         if _h_overall == "OK":
             health_badge_html = (
-                f"<span title='SOC Health OK — {_h_ts}' style='display:flex;align-items:center;"
+                f"<span class='soc-health-badge' title='SOC Health OK — {_h_ts}' style='display:flex;align-items:center;"
                 f"gap:4px;padding:4px 10px;border-radius:16px;background:#052e16;border:1px solid #166534;"
                 f"font-size:10px;font-weight:600;color:#4ade80;white-space:nowrap;cursor:default'>"
                 f"<span class='dot-active'></span>SOC OK</span>"
             )
         elif _h_overall == "WARN":
             health_badge_html = (
-                f"<span title='WARN: {_h_ko_str} — {_h_ts}' style='display:flex;align-items:center;"
+                f"<span class='soc-health-badge' title='WARN: {_h_ko_str} — {_h_ts}' style='display:flex;align-items:center;"
                 f"gap:4px;padding:4px 10px;border-radius:16px;background:#451a03;border:1px solid #d97706;"
                 f"font-size:10px;font-weight:600;color:#fbbf24;white-space:nowrap;cursor:default'>⚠ SOC WARN</span>"
             )
         else:
             health_badge_html = (
-                f"<span title='KO: {_h_ko_str} — {_h_ts}' style='display:flex;align-items:center;"
+                f"<span class='soc-health-badge' title='KO: {_h_ko_str} — {_h_ts}' style='display:flex;align-items:center;"
                 f"gap:4px;padding:4px 10px;border-radius:16px;background:#450a0a;border:1px solid #dc2626;"
                 f"font-size:10px;font-weight:600;color:#fca5a5;white-space:nowrap;cursor:default'>✗ SOC KO</span>"
             )
@@ -638,7 +638,7 @@ def build_html():
 
     # ── Services ──
     svc_down = [l for l, s in srv_status if s != "active"]
-    svc_badge = f"<span style='background:#7f1d1d;color:#fca5a5;border-radius:6px;padding:2px 10px;font-size:11px;font-weight:600'>⚠ {len(svc_down)} KO</span>" if svc_down else ""
+    svc_badge = f"<span class='svc-ko-badge' style='background:#7f1d1d;color:#fca5a5;border-radius:6px;padding:2px 10px;font-size:11px;font-weight:600'>⚠ {len(svc_down)} KO</span>" if svc_down else ""
 
     services_cards = ""
     for label, status in srv_status:
@@ -929,10 +929,10 @@ def build_html():
         )
 
     # ── Bouton rapport ──
-    report_btn = "<button onclick='sendReport(this)' class='btn-primary' style='font-size:11px;padding:4px 12px'>📋 Rapport maintenant</button>" if ACTIONS_KEY else ""
+    report_btn = "<button id='report-btn' onclick='sendReport(this)' class='btn-primary' style='font-size:11px;padding:4px 12px'>📋 Rapport maintenant</button>" if ACTIONS_KEY else ""
 
     # ── Bouton IR ──
-    ir_btn = f'<button onclick="openIR()" style="background:#450a0a;border:1px solid #dc2626;color:#fca5a5;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600">⚡ IR</button>'
+    ir_btn = f'<button class="ir-btn" onclick="openIR()" style="background:#450a0a;border:1px solid #dc2626;color:#fca5a5;padding:5px 14px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600">⚡ IR</button>'
 
     # ── Actions JS ──
     actions_js = ""
@@ -1180,11 +1180,15 @@ tr:last-child td{{border-bottom:none}}
   .nav-item{{display:none}}
   .topbar-hostname{{display:none}}
   .hamburger{{display:block}}
-  .topbar-right{{gap:4px;padding-left:6px}}
+  .topbar-right{{gap:6px;padding-left:6px;overflow:hidden}}
   #status-bar{{display:none}}
   .oncall-badge{{display:none}}
   .age-indicator{{display:none}}
-  .threat-badge{{font-size:11px;padding:3px 7px}}
+  .threat-badge{{display:none}}
+  .soc-health-badge{{display:none}}
+  .svc-ko-badge{{display:none}}
+  #report-btn{{display:none}}
+  .ir-btn{{display:none}}
   /* Panels slide-in — largeur adaptative */
   .settings-panel{{width:min(320px,92vw)}}
   .notif-panel{{width:min(360px,92vw)}}
@@ -1219,13 +1223,9 @@ tr:last-child td{{border-bottom:none}}
 }}
 @media(max-width:480px){{
   .topbar-brand span{{display:none}}
-  .threat-badge{{font-size:10px;padding:3px 6px}}
   /* Panels pleine largeur sur très petit écran */
   .settings-panel{{width:100vw}}
   .notif-panel{{width:100vw}}
-  /* Topbar droite — conserver uniquement l'essentiel */
-  #report-btn{{display:none}}
-  .ir-btn{{font-size:10px;padding:3px 7px}}
   /* Toast au dessus bottom-nav */
   #toast{{bottom:96px}}
   /* Heatmap */
