@@ -39,6 +39,7 @@ except ImportError:
 if _limiter_ok:
     limiter = Limiter(key_func=get_remote_address, default_limits=["60 per minute"])
     limiter.init_app(app)
+    _auth_limit = limiter.limit("5 per minute")
 
 ACTIONS_KEY   = os.environ.get("SOC_ACTIONS_KEY", "")
 DASHBOARD_PWD = os.environ.get("SOC_DASHBOARD_PWD", "")  # Mot de passe mire de connexion (distinct de la clé API)
@@ -72,7 +73,7 @@ def valid_ip(ip):
 # ─────────────────────────────────────────
 
 @app.route("/auth", methods=["POST"])
-@(_limiter.limit("5 per minute") if _limiter_ok else lambda f: f)
+@(_auth_limit if _limiter_ok else lambda f: f)
 def auth():
     """Valide le mot de passe de la mire de connexion (SOC_DASHBOARD_PWD)."""
     data = request.get_json(force=True) or {}
