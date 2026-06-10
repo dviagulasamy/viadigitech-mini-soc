@@ -1242,6 +1242,38 @@ tr:last-child td{{border-bottom:none}}
 .toggle input:checked+.toggle-slider:before{{transform:translateX(18px)}}
 .settings-save-btn{{margin:16px 20px;background:var(--accent);border:none;color:#fff;padding:10px;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;width:calc(100% - 40px);transition:background .15s}}
 .settings-save-btn:hover{{background:#4f46e5}}
+/* ── Notification panel ── */
+.notif-btn{{position:relative;background:none;border:1px solid var(--border);color:var(--muted);padding:5px 10px;border-radius:6px;cursor:pointer;font-size:14px;line-height:1;display:flex;align-items:center;justify-content:center}}
+.notif-btn:hover{{border-color:var(--accent);color:var(--accent-light)}}
+.notif-badge{{position:absolute;top:-5px;right:-5px;min-width:16px;height:16px;background:#ef4444;color:#fff;border-radius:8px;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 3px;line-height:1;display:none}}
+.notif-badge.visible{{display:flex}}
+.notif-panel{{position:fixed;top:0;right:0;width:360px;height:100vh;background:var(--bg2);border-left:1px solid var(--border);z-index:7000;transform:translateX(100%);transition:transform .28s cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column;box-shadow:-8px 0 32px rgba(0,0,0,.5)}}
+.notif-panel.open{{transform:translateX(0)}}
+.notif-panel-header{{padding:16px 20px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}}
+.notif-panel-title{{font-size:14px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:8px}}
+.notif-panel-actions{{display:flex;align-items:center;gap:8px}}
+.notif-filter-bar{{padding:10px 16px;border-bottom:1px solid var(--border);display:flex;gap:6px;flex-wrap:wrap;flex-shrink:0}}
+.notif-filter-btn{{font-size:11px;padding:3px 9px;border-radius:10px;border:1px solid var(--border2);background:none;color:var(--muted);cursor:pointer;transition:all .15s}}
+.notif-filter-btn.active{{background:var(--accent);border-color:var(--accent);color:#fff}}
+.notif-list{{flex:1;overflow-y:auto;padding:8px 0}}
+.notif-list::-webkit-scrollbar{{width:4px}}.notif-list::-webkit-scrollbar-track{{background:transparent}}.notif-list::-webkit-scrollbar-thumb{{background:#334155;border-radius:2px}}
+.notif-item{{padding:10px 16px;border-bottom:1px solid rgba(51,65,85,.4);cursor:default;transition:background .1s;display:flex;gap:10px;align-items:flex-start}}
+.notif-item:hover{{background:rgba(99,102,241,.06)}}
+.notif-item.unread{{border-left:3px solid var(--accent);padding-left:13px}}
+.notif-item.unread.ban-auto{{border-left-color:#ef4444}}
+.notif-item.unread.ban-temp{{border-left-color:#f59e0b}}
+.notif-item.unread.honeypot{{border-left-color:#a855f7}}
+.notif-item.unread.low-slow{{border-left-color:#06b6d4}}
+.notif-dot{{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:5px}}
+.notif-dot.ban-auto{{background:#ef4444}}.notif-dot.ban-temp{{background:#f59e0b}}.notif-dot.honeypot{{background:#a855f7}}.notif-dot.low-slow{{background:#06b6d4}}.notif-dot.surveille{{background:#475569}}.notif-dot.system{{background:#6366f1}}
+.notif-content{{flex:1;min-width:0}}
+.notif-action{{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:2px}}
+.notif-action.ban-auto{{color:#ef4444}}.notif-action.ban-temp{{color:#f59e0b}}.notif-action.honeypot{{color:#a855f7}}.notif-action.low-slow{{color:#06b6d4}}.notif-action.surveille{{color:#475569}}.notif-action.system{{color:#6366f1}}
+.notif-msg{{font-size:12px;color:var(--text);line-height:1.4;word-break:break-all}}
+.notif-ts{{font-size:10px;color:var(--dim);margin-top:3px}}
+.notif-empty{{text-align:center;padding:40px 20px;color:var(--muted);font-size:13px}}
+.notif-digest-bar{{padding:10px 16px;background:rgba(99,102,241,.08);border-bottom:1px solid var(--border);font-size:12px;color:#a5b4fc;display:none;align-items:center;gap:6px}}
+.notif-digest-bar.visible{{display:flex}}
 .oncall-badge{{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600}}
 .oncall-on{{background:#14532d;color:#86efac}}
 .oncall-off{{background:#1e2942;color:var(--muted)}}
@@ -1350,6 +1382,32 @@ body.ir-active .topbar{{margin-top:28px}}
     <input class="login-input" id="login-key" type="password" placeholder="Clé d'accès SOC..." autocomplete="off">
     <button class="login-btn" onclick="doLogin()">Accéder au SOC</button>
     <div class="login-error" id="login-error"></div>
+  </div>
+</div>
+
+<!-- ═══ NOTIFICATION PANEL ═══ -->
+<div class="settings-overlay" id="notif-overlay" onclick="closeNotifPanel()"></div>
+<div class="notif-panel" id="notif-panel">
+  <div class="notif-panel-header">
+    <div class="notif-panel-title">🔔 Notifications <span id="notif-count-label" style="font-size:11px;color:var(--muted);font-weight:400"></span></div>
+    <div class="notif-panel-actions">
+      <button onclick="markAllNotifsRead()" title="Tout marquer comme lu" style="background:none;border:1px solid var(--border2);color:var(--muted);padding:4px 9px;border-radius:6px;font-size:11px;cursor:pointer">✓ Lus</button>
+      <button onclick="closeNotifPanel()" style="background:none;border:none;color:var(--muted);font-size:18px;cursor:pointer;line-height:1">×</button>
+    </div>
+  </div>
+  <div class="notif-digest-bar" id="notif-digest-bar">
+    <span>📬</span><span id="notif-digest-text"></span>
+  </div>
+  <div class="notif-filter-bar">
+    <button class="notif-filter-btn active" onclick="setNotifFilter('all',this)">Tout</button>
+    <button class="notif-filter-btn" onclick="setNotifFilter('ban-auto',this)">🚨 Ban Auto</button>
+    <button class="notif-filter-btn" onclick="setNotifFilter('ban-temp',this)">⚠️ Ban Temp</button>
+    <button class="notif-filter-btn" onclick="setNotifFilter('honeypot',this)">🍯 Honeypot</button>
+    <button class="notif-filter-btn" onclick="setNotifFilter('low-slow',this)">🐢 Low&amp;Slow</button>
+    <button class="notif-filter-btn" onclick="setNotifFilter('surveille',this)">👁 Surveille</button>
+  </div>
+  <div class="notif-list" id="notif-list">
+    <div class="notif-empty">Chargement…</div>
   </div>
 </div>
 
@@ -1486,6 +1544,61 @@ body.ir-active .topbar{{margin-top:28px}}
       <button onclick="clearGeoCache(this)" style="background:#1a1008;border:1px solid #78350f;color:#fde68a;padding:5px 10px;border-radius:7px;font-size:11px;cursor:pointer">🗺️ Vider</button>
     </div>
   </div>
+  <div class="settings-section">
+    <div class="settings-section-title">📧 Notifications Email</div>
+    <div class="settings-row">
+      <div><div class="settings-label">Mode d'envoi</div><div class="settings-sub">Immédiat ou digest groupé</div></div>
+      <select class="settings-input" id="cfg-mail-mode" style="width:auto;padding:5px 8px;cursor:pointer" onchange="toggleDigestOptions()">
+        <option value="immediate">Immédiat</option>
+        <option value="digest">Digest groupé</option>
+      </select>
+    </div>
+    <div id="cfg-digest-options" style="display:none">
+      <div class="settings-row">
+        <div><div class="settings-label">Fréquence digest</div><div class="settings-sub">Envoie un seul mail toutes les N heures</div></div>
+        <select class="settings-input" id="cfg-mail-digest-hours" style="width:auto;padding:5px 8px;cursor:pointer">
+          <option value="1">1h</option>
+          <option value="2">2h</option>
+          <option value="4" selected>4h</option>
+          <option value="6">6h</option>
+          <option value="12">12h</option>
+          <option value="24">24h</option>
+        </select>
+      </div>
+      <div class="settings-row">
+        <div><div class="settings-label">En attente</div><div class="settings-sub">Événements dans le buffer digest</div></div>
+        <span id="cfg-digest-pending" style="font-size:13px;color:#a5b4fc;font-weight:600">—</span>
+      </div>
+      <div style="margin-top:4px">
+        <button onclick="flushDigestNow(this)" style="width:100%;background:#0d1a2e;border:1px solid #1e3a5f;color:#7dd3fc;padding:7px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">📤 Envoyer le digest maintenant</button>
+      </div>
+    </div>
+    <div style="margin-top:12px;margin-bottom:6px">
+      <div class="settings-sub" style="margin-bottom:8px">Types d'alertes à recevoir par mail :</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <label style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text);cursor:pointer">
+          <label class="toggle" style="transform:scale(.8);transform-origin:left"><input type="checkbox" id="cfg-mail-ban-auto" checked><span class="toggle-slider"></span></label>
+          <span style="color:#ef4444">🚨 Ban Auto</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text);cursor:pointer">
+          <label class="toggle" style="transform:scale(.8);transform-origin:left"><input type="checkbox" id="cfg-mail-ban-temp" checked><span class="toggle-slider"></span></label>
+          <span style="color:#f59e0b">⚠️ Ban Temp</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text);cursor:pointer">
+          <label class="toggle" style="transform:scale(.8);transform-origin:left"><input type="checkbox" id="cfg-mail-honeypot" checked><span class="toggle-slider"></span></label>
+          <span style="color:#a855f7">🍯 Honeypot</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text);cursor:pointer">
+          <label class="toggle" style="transform:scale(.8);transform-origin:left"><input type="checkbox" id="cfg-mail-low-slow" checked><span class="toggle-slider"></span></label>
+          <span style="color:#06b6d4">🐢 Low&amp;Slow</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text);cursor:pointer">
+          <label class="toggle" style="transform:scale(.8);transform-origin:left"><input type="checkbox" id="cfg-mail-system" checked><span class="toggle-slider"></span></label>
+          <span style="color:#6366f1">⚡ Système</span>
+        </label>
+      </div>
+    </div>
+  </div>
   <button class="settings-save-btn" onclick="saveSettings()">💾 Sauvegarder</button>
 </div>
 
@@ -1541,6 +1654,7 @@ body.ir-active .topbar{{margin-top:28px}}
     </div>
     <span id="oncall-badge" style="display:none" class="oncall-badge oncall-on">ON CALL</span>
     {health_badge_html}
+    <button class="notif-btn" onclick="openNotifPanel()" title="Notifications">🔔<span class="notif-badge" id="notif-badge">0</span></button>
     <button onclick="openSettings()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:5px 10px;border-radius:6px;cursor:pointer;font-size:13px" title="Paramètres">⚙️</button>
     <button id="theme-toggle" onclick="toggleTheme()" style="background:none;border:1px solid var(--border);color:var(--muted);padding:5px 10px;border-radius:6px;cursor:pointer;font-size:13px" title="Mode sombre/clair">🌙</button>
     {ir_btn}
@@ -2014,6 +2128,148 @@ function applyAutologout(){{
 );
 
 // ── Settings panel ──
+// ── Notification Panel ──
+let _notifFilter='all';
+let _notifData=[];
+let _notifReadTs=0;
+let _notifRefreshTimer=null;
+
+function _notifClass(action){{
+  if(!action)return'surveille';
+  const a=action.toUpperCase();
+  if(a==='BAN_AUTO'||a==='BAN_OLLAMA')return'ban-auto';
+  if(a==='BAN_TEMP'||a==='DRYRUN_BAN')return'ban-temp';
+  if(a==='HONEYPOT')return'honeypot';
+  if(a==='LOW_SLOW'||a==='LOW&SLOW')return'low-slow';
+  if(a==='SURVEILLE')return'surveille';
+  return'system';
+}}
+function _notifIcon(cls){{
+  return{{
+    'ban-auto':'🚨','ban-temp':'⚠️','honeypot':'🍯',
+    'low-slow':'🐢','surveille':'👁','system':'⚡'
+  }}[cls]||'•';
+}}
+function _tsRelative(ts){{
+  try{{
+    const d=new Date(ts.replace(' ','T'));
+    const diff=Math.floor((Date.now()-d)/1000);
+    if(diff<60)return`${{diff}}s`;
+    if(diff<3600)return`${{Math.floor(diff/60)}}min`;
+    if(diff<86400)return`${{Math.floor(diff/3600)}}h`;
+    return`${{Math.floor(diff/86400)}}j`;
+  }}catch{{return ts.slice(0,16).replace('T',' ');}}
+}}
+
+async function loadNotifications(){{
+  const key=localStorage.getItem('soc_api_key')||sessionStorage.getItem('soc_api_key')||'';
+  try{{
+    const r=await fetch('/action/notifications?limit=80',{{headers:{{'X-SOC-Key':key}}}});
+    if(!r.ok)return;
+    const d=await r.json();
+    _notifData=d.notifications||[];
+    // Badge digest
+    const pendingBar=document.getElementById('notif-digest-bar');
+    const pendingTxt=document.getElementById('notif-digest-text');
+    const digestPending=d.digest_pending||0;
+    if(digestPending>0&&pendingBar){{
+      pendingBar.classList.add('visible');
+      if(pendingTxt)pendingTxt.textContent=`Mode digest — ${{digestPending}} événement(s) en attente d'envoi`;
+      const pp=document.getElementById('cfg-digest-pending');
+      if(pp)pp.textContent=digestPending+' événement(s)';
+    }}else if(pendingBar){{
+      pendingBar.classList.remove('visible');
+    }}
+    renderNotifList();
+    updateNotifBadge();
+  }}catch(e){{}}
+}}
+function renderNotifList(){{
+  const list=document.getElementById('notif-list');
+  if(!list)return;
+  const items=_notifFilter==='all'?_notifData:_notifData.filter(n=>_notifClass(n.action)===_notifFilter);
+  const countLabel=document.getElementById('notif-count-label');
+  if(countLabel)countLabel.textContent=`(${{items.length}})`;
+  if(!items.length){{list.innerHTML='<div class="notif-empty">Aucune notification</div>';return;}}
+  list.innerHTML=items.map(n=>{{
+    const cls=_notifClass(n.action);
+    const isNew=new Date(n.timestamp.replace(' ','T')).getTime()>_notifReadTs;
+    return`<div class="notif-item${{isNew?' unread':''}} ${{cls}}">
+      <div class="notif-dot ${{cls}}"></div>
+      <div class="notif-content">
+        <div class="notif-action ${{cls}}">${{_notifIcon(cls)}} ${{n.action||'EVENT'}}</div>
+        <div class="notif-msg">${{n.ip?`<b>${{n.ip}}</b> — `:''}}<span style="color:var(--muted)">${{(n.reason||'').replace(/</g,'&lt;').slice(0,90)}}</span>${{n.score?' <b style="color:#f87171">'+n.score+'%</b>':''}}</div>
+        <div class="notif-ts">${{_tsRelative(n.timestamp)}}</div>
+      </div>
+    </div>`;
+  }}).join('');
+}}
+function updateNotifBadge(){{
+  const badge=document.getElementById('notif-badge');
+  if(!badge)return;
+  const unread=_notifData.filter(n=>new Date(n.timestamp.replace(' ','T')).getTime()>_notifReadTs).length;
+  if(unread>0){{badge.textContent=unread>99?'99+':unread;badge.classList.add('visible');}}
+  else{{badge.classList.remove('visible');}}
+}}
+function openNotifPanel(){{
+  loadNotifications();
+  document.getElementById('notif-panel').classList.add('open');
+  document.getElementById('notif-overlay').classList.add('open');
+  if(_notifRefreshTimer)clearInterval(_notifRefreshTimer);
+  _notifRefreshTimer=setInterval(loadNotifications,60000);
+}}
+function closeNotifPanel(){{
+  document.getElementById('notif-panel').classList.remove('open');
+  document.getElementById('notif-overlay').classList.remove('open');
+  if(_notifRefreshTimer){{clearInterval(_notifRefreshTimer);_notifRefreshTimer=null;}}
+}}
+function markAllNotifsRead(){{
+  _notifReadTs=Date.now();
+  localStorage.setItem('soc_notif_read_ts',_notifReadTs);
+  renderNotifList();
+  updateNotifBadge();
+  showToast('Toutes les notifications marquées comme lues',true);
+}}
+function setNotifFilter(f,btn){{
+  _notifFilter=f;
+  document.querySelectorAll('.notif-filter-btn').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  renderNotifList();
+}}
+function toggleDigestOptions(){{
+  const mode=document.getElementById('cfg-mail-mode')?.value;
+  const opts=document.getElementById('cfg-digest-options');
+  if(opts)opts.style.display=mode==='digest'?'block':'none';
+}}
+async function flushDigestNow(btn){{
+  const key=localStorage.getItem('soc_api_key')||sessionStorage.getItem('soc_api_key')||'';
+  if(btn){{btn.disabled=true;btn.textContent='⏳ Envoi…';}}
+  try{{
+    const r=await fetch('/action/digest/flush',{{method:'POST',headers:{{'X-SOC-Key':key}}}});
+    const d=await r.json();
+    showToast(d.ok?`✓ Digest envoyé — ${{d.count||0}} événement(s)`:('Erreur: '+d.error),d.ok);
+    loadNotifications();
+  }}catch(e){{showToast('Erreur réseau',false);}}
+  finally{{if(btn){{btn.disabled=false;btn.textContent='📤 Envoyer le digest maintenant';}}}}
+}}
+(function(){{
+  _notifReadTs=parseInt(localStorage.getItem('soc_notif_read_ts')||'0');
+  // Vérification silencieuse du badge au chargement
+  const key=localStorage.getItem('soc_api_key')||sessionStorage.getItem('soc_api_key')||'';
+  if(key){{
+    fetch('/action/notifications?limit=80',{{headers:{{'X-SOC-Key':key}}}}).then(r=>r.ok?r.json():null).then(d=>{{
+      if(d){{_notifData=d.notifications||[];updateNotifBadge();}}
+    }}).catch(()=>{{}});
+  }}
+  setInterval(()=>{{
+    if(key){{
+      fetch('/action/notifications?limit=80',{{headers:{{'X-SOC-Key':key}}}}).then(r=>r.ok?r.json():null).then(d=>{{
+        if(d){{_notifData=d.notifications||[];updateNotifBadge();if(document.getElementById('notif-panel')?.classList.contains('open'))renderNotifList();}}
+      }}).catch(()=>{{}});
+    }}
+  }},120000);
+}})();
+
 function openSettings(){{
   loadSettingsFromServer();
   document.getElementById('settings-panel').classList.add('open');
@@ -2053,6 +2309,14 @@ async function loadSettingsFromServer(){{
     if(el('cfg-subnet-ban'))el('cfg-subnet-ban').checked=!!cfg.subnet_ban_enabled;
     if(el('cfg-subnet-threshold'))el('cfg-subnet-threshold').value=cfg.subnet_ban_threshold||3;
     if(el('cfg-telegram-chat'))el('cfg-telegram-chat').value=cfg.telegram_chat_id||'';
+    // Email notifications settings
+    if(el('cfg-mail-mode')){{el('cfg-mail-mode').value=cfg.mail_mode||'immediate';toggleDigestOptions();}}
+    if(el('cfg-mail-digest-hours'))el('cfg-mail-digest-hours').value=cfg.mail_digest_hours||4;
+    if(el('cfg-mail-ban-auto'))el('cfg-mail-ban-auto').checked=cfg.mail_types_ban_auto!==false;
+    if(el('cfg-mail-ban-temp'))el('cfg-mail-ban-temp').checked=cfg.mail_types_ban_temp!==false;
+    if(el('cfg-mail-honeypot'))el('cfg-mail-honeypot').checked=cfg.mail_types_honeypot!==false;
+    if(el('cfg-mail-low-slow'))el('cfg-mail-low-slow').checked=cfg.mail_types_low_slow!==false;
+    if(el('cfg-mail-system'))el('cfg-mail-system').checked=cfg.mail_types_system!==false;
     updateOncallBadge(!!cfg.oncall);
     applyAutologout();
   }}catch(e){{}}
@@ -2078,7 +2342,14 @@ async function saveSettings(){{
     subnet_ban_enabled:el('cfg-subnet-ban')?.checked||false,
     subnet_ban_threshold:parseInt(el('cfg-subnet-threshold')?.value||3),
     telegram_token:el('cfg-telegram-token')?.value.trim()||'',
-    telegram_chat_id:el('cfg-telegram-chat')?.value.trim()||''
+    telegram_chat_id:el('cfg-telegram-chat')?.value.trim()||'',
+    mail_mode:el('cfg-mail-mode')?.value||'immediate',
+    mail_digest_hours:parseInt(el('cfg-mail-digest-hours')?.value||4),
+    mail_types_ban_auto:el('cfg-mail-ban-auto')?.checked!==false,
+    mail_types_ban_temp:el('cfg-mail-ban-temp')?.checked!==false,
+    mail_types_honeypot:el('cfg-mail-honeypot')?.checked!==false,
+    mail_types_low_slow:el('cfg-mail-low-slow')?.checked!==false,
+    mail_types_system:el('cfg-mail-system')?.checked!==false
   }};
   try{{
     const r=await fetch('/action/config',{{method:'POST',headers:{{'Content-Type':'application/json','X-SOC-Key':key}},body:JSON.stringify(payload)}});

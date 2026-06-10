@@ -134,6 +134,8 @@ auth.log → parse SSH fails → AbuseIPDB score
 | POST | `/maintenance/purge` | clé | Purge logs anciens |
 | POST | `/maintenance/clear-geo` | clé | Vider cache géo |
 | POST | `/annotation/add` | clé | Annoter timeline |
+| GET | `/notifications` | clé | 80 dernières actions SOC (audit_actions.csv) |
+| POST | `/digest/flush` | clé | Envoi immédiat du buffer digest email |
 | GET | `/stream` | clé | SSE métriques live |
 
 ---
@@ -151,6 +153,7 @@ auth.log → parse SSH fails → AbuseIPDB score
 | `geo_cache.json` | Cache géolocalisation ip-api.com (ASN inclus) |
 | `annotations.json` | Annotations manuelles sur la timeline |
 | `metrics_history.csv` | Historique CPU/RAM/disk (7j) |
+| `mail_digest_buffer.json` | Buffer d'événements en attente d'envoi digest email |
 
 ---
 
@@ -176,7 +179,30 @@ auth.log → parse SSH fails → AbuseIPDB score
 | Sprint 2 | V2 Jauge SVG, V4 Timeline, V7 Login premium, F3 Honeypot, F4 Low&Slow | ✅ |
 | Sprint 3 | F5 Rapport hebdo, F6 IA prédictive, F7 TI feeds, F8 Scoring adaptatif, F9 Réponse graduée | ✅ |
 | Sprint 4 | V5 Skeleton, V6 Heatmap tooltips, V8 IR dramatisé, V9 Sparklines gradient, F10 ASN, F12 SIEM export, F13 Playbooks IR | ✅ |
+| Post-Sprint | N1 Notification bell, N2 Digest email, N3 Filtres mail par type | ✅ |
 
 ---
 
-*Mis à jour : juin 2026 — V10.0*
+## Nouvelles fonctionnalités (juin 2026 — post-Sprint 4)
+
+### N1 — Panneau de notifications 🔔
+- Cloche dans la topbar avec badge rouge (non-lus)
+- Panneau slide-in : 80 derniers événements depuis `audit_actions.csv`
+- 5 filtres par type : Ban Auto / Ban Temp / Honeypot / Low&Slow / Surveille
+- Code couleur par action, marqueur non-lu, "tout marquer lu" (localStorage)
+- Auto-refresh 60s (panneau ouvert) / 2min (fond)
+
+### N2 — Digest email configurable
+- Nouveau mode `mail_mode: "immediate" | "digest"` dans `soc_config.json`
+- Mode digest : accumule les alertes dans `mail_digest_buffer.json`
+- Envoi groupé automatique selon la fréquence choisie (1h/2h/4h/6h/12h/24h)
+- Email digest HTML dark-mode avec tableau récapitulatif
+
+### N3 — Filtres par type d'alerte email
+- 5 toggles dans les paramètres : Ban Auto, Ban Temp, Honeypot, Low&Slow, Système
+- Stocké dans `soc_config.json` (`mail_types_*`)
+- Appliqué dans `detector.py` avant tout envoi ou ajout au buffer
+
+---
+
+*Mis à jour : juin 2026 — V10.1*

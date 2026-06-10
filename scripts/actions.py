@@ -7,6 +7,7 @@ Endpoints : /ban, /unban, /analyze, /report, /whitelist/add, /whitelist/remove, 
 
 import os
 import re
+import csv
 import subprocess
 import threading
 import time
@@ -667,6 +668,101 @@ def block_asn():
         "total_candidates": len(ips_to_ban),
         "errors": errors[:5]
     })
+
+
+@app.route("/notifications", methods=["GET"])
+@require_key
+def get_notifications():
+    """Retourne les dernières entrées d'audit_actions.csv pour le panneau de notifications."""
+    try:
+        limit = min(int(request.args.get("limit", 80)), 200)
+        audit_path = "/home/ubuntu/secops/audit_actions.csv"
+        rows = []
+        if os.path.exists(audit_path):
+            with open(audit_path, newline="", encoding="utf-8") as f:
+                # Lire manuellement pour gérer les virgules dans le champ reason
+                lines = f.readlines()
+            for line in lines[1:]:  # skip header
+                parts = line.strip().split(",", 4)
+                if len(parts) >= 4:
+                    rows.append({
+                        "timestamp": parts[0],
+                        "ip":        parts[1],
+                        "action":    parts[2],
+                        "score":     parts[3],
+                        "reason":    parts[4] if len(parts) > 4 else ""
+                    })
+        rows = rows[-limit:][::-1]
+        # Ajouter les events du digest buffer s'il existe
+        digest_path = "/home/ubuntu/secops/mail_digest_buffer.json"
+        pending_count = 0
+        if os.path.exists(digest_path):
+            with open(digest_path) as f:
+                buf = json.load(f)
+                pending_count = len(buf.get("events", []))
+        return jsonify({"ok": True, "notifications": rows, "total": len(rows), "digest_pending": pending_count})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/digest/flush", methods=["POST"])
+@require_key
+def flush_digest():
+    """Force l'envoi immédiat du buffer digest en cours."""
+    digest_path = "/home/ubuntu/secops/mail_digest_buffer.json"
+    try:
+        if not os.path.exists(digest_path):
+            return jsonify({"ok": False, "error": "Aucun buffer digest trouvé"}), 404
+        with open(digest_path) as f:
+            buf = json.load(f)
+        events = buf.get("events", [])
+        if not events:
+            return jsonify({"ok": True, "count": 0, "message": "Buffer vide, rien à envoyer"})
+        # Appeler detector via subprocess pour déclencher le digest
+        import smtplib
+        from email.mime.multipart import MIMEMultipart as _MMP
+        from email.mime.text import MIMEText as _MMT
+        from datetime import datetime as _dt
+        mail_from = os.environ.get("SOC_MAIL_FROM", "secops@viadigitech.com")
+        mail_to   = os.environ.get("SOC_MAIL_TO", "david@viadigitech.com").split(",")
+        n = len(events)
+        rows = ""
+        for e in events[:50]:
+            color = "#ef4444" if e.get("niveau") == "CRITIQUE" else "#f59e0b"
+            ts_s = e.get("ts", "")[:16].replace("T", " ")
+            rows += (f"<tr><td style='padding:6px 8px;border:1px solid #334155;color:#64748b;font-size:11px'>{ts_s}</td>"
+                     f"<td style='padding:6px 8px;border:1px solid #334155;color:{color};font-weight:bold;font-size:11px'>{e.get('niveau','')}</td>"
+                     f"<td style='padding:6px 8px;border:1px solid #334155;font-size:12px'>{e.get('message','')}</td></tr>")
+        html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head>
+<body style="background:#0f172a;font-family:'Segoe UI',sans-serif;color:#e2e8f0">
+<div style="max-width:680px;margin:0 auto;padding:24px">
+  <div style="background:#1a2744;border-left:4px solid #6366f1;border-radius:10px;padding:20px;margin-bottom:20px">
+    <div style="font-size:11px;color:#64748b;text-transform:uppercase">DIGEST SOC — envoi manuel</div>
+    <div style="font-size:22px;font-weight:800;margin:6px 0">📬 {n} événement(s)</div>
+  </div>
+  <table style="width:100%;border-collapse:collapse">
+    <thead><tr>
+      <th style="padding:8px;background:#0f172a;text-align:left;font-size:11px;color:#64748b;border:1px solid #334155">Heure</th>
+      <th style="padding:8px;background:#0f172a;text-align:left;font-size:11px;color:#64748b;border:1px solid #334155">Niveau</th>
+      <th style="padding:8px;background:#0f172a;text-align:left;font-size:11px;color:#64748b;border:1px solid #334155">Événement</th>
+    </tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+</div></body></html>"""
+        now = _dt.now()
+        msg = _MMP("alternative")
+        msg["From"]    = mail_from
+        msg["To"]      = ", ".join(mail_to)
+        msg["Subject"] = f"[SOC Digest Manuel] {n} événement(s) — {now.strftime('%d/%m %H:%M')}"
+        msg.attach(_MMT(html, "html", "utf-8"))
+        with smtplib.SMTP("localhost") as s:
+            s.sendmail(mail_from, mail_to, msg.as_string())
+        # Vider le buffer
+        with open(digest_path, "w") as f:
+            json.dump({"last_sent": now.isoformat(), "events": []}, f)
+        return jsonify({"ok": True, "count": n})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 
 @app.route("/stream")

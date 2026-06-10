@@ -43,6 +43,7 @@ AUTH_LOG             = "/var/log/auth.log"
 STATE_FILE           = "/tmp/soc_detector_state.txt"
 AUDIT_LOG            = "/home/ubuntu/secops/audit_actions.csv"
 THREAT_PATTERNS_FILE = "/home/ubuntu/secops/threat_patterns.json"
+DIGEST_BUFFER_FILE   = "/home/ubuntu/secops/mail_digest_buffer.json"
 WINDOW_MIN       = 15   # fenêtre d'analyse en minutes
 
 # Mode : "dryrun" = mail de confirmation, "auto" = ban immédiat
@@ -488,6 +489,174 @@ def mark_alerted(key):
         f.writelines(lines[-50:])
 
 # ─────────────────────────────────────────
+# DIGEST EMAIL — buffer + envoi groupé
+# ─────────────────────────────────────────
+
+def load_mail_config():
+    """Lit les paramètres email depuis soc_config.json."""
+    defaults = {
+        "mail_mode": "immediate",
+        "mail_digest_hours": 4,
+        "mail_types_ban_auto": True,
+        "mail_types_ban_temp": True,
+        "mail_types_honeypot": True,
+        "mail_types_low_slow": True,
+        "mail_types_system": True,
+    }
+    try:
+        with open("/home/ubuntu/secops/soc_config.json") as f:
+            cfg = json.load(f)
+        for k, v in defaults.items():
+            defaults[k] = cfg.get(k, v)
+    except Exception:
+        pass
+    return defaults
+
+def _alert_type(alertes, actions):
+    """Détermine le type principal d'une liste d'alertes pour le filtre mail_types."""
+    types = set()
+    for a in actions:
+        if a["action"] == "BAN_AUTO":
+            types.add("ban_auto")
+        elif a["action"] in ("BAN_TEMP", "DRYRUN_BAN"):
+            types.add("ban_temp")
+    for a in alertes:
+        msg = a.get("message", "").lower()
+        if "honeypot" in msg:
+            types.add("honeypot")
+        elif "low" in msg and "slow" in msg:
+            types.add("low_slow")
+        elif any(k in msg for k in ("cpu", "ram", "disque", "disk")):
+            types.add("system")
+        elif "ssh" in msg or "ban" in msg:
+            types.add("ban_auto")
+    return types or {"system"}
+
+def is_mail_type_enabled(cfg, types):
+    """Retourne True si au moins un des types est activé dans la config mail."""
+    mapping = {
+        "ban_auto": "mail_types_ban_auto",
+        "ban_temp": "mail_types_ban_temp",
+        "honeypot": "mail_types_honeypot",
+        "low_slow": "mail_types_low_slow",
+        "system":   "mail_types_system",
+    }
+    return any(cfg.get(mapping.get(t, "mail_types_system"), True) for t in types)
+
+def append_to_digest(alertes, actions, sys_metrics):
+    """Ajoute les alertes au buffer digest."""
+    buf = {"last_sent": None, "events": []}
+    if os.path.exists(DIGEST_BUFFER_FILE):
+        try:
+            with open(DIGEST_BUFFER_FILE) as f:
+                buf = json.load(f)
+        except Exception:
+            pass
+    if buf.get("last_sent") is None:
+        buf["last_sent"] = datetime.now().isoformat()
+    for a in alertes:
+        buf["events"].append({
+            "ts": datetime.now().isoformat(),
+            "niveau": a["niveau"],
+            "message": a["message"],
+        })
+    with open(DIGEST_BUFFER_FILE, "w") as f:
+        json.dump(buf, f)
+
+def flush_digest_if_ready(mail_cfg, sys_metrics, ssh_fails, top_ips, new_bans):
+    """Envoie le digest si l'intervalle est écoulé et qu'il y a des événements."""
+    if not os.path.exists(DIGEST_BUFFER_FILE):
+        return False
+    try:
+        with open(DIGEST_BUFFER_FILE) as f:
+            buf = json.load(f)
+    except Exception:
+        return False
+    events = buf.get("events", [])
+    if not events:
+        return False
+    last_sent_str = buf.get("last_sent")
+    try:
+        last_sent = datetime.fromisoformat(last_sent_str)
+    except Exception:
+        last_sent = datetime.now() - timedelta(hours=999)
+    interval_h = int(mail_cfg.get("mail_digest_hours", 4))
+    if datetime.now() - last_sent < timedelta(hours=interval_h):
+        return False
+    # Envoyer le digest
+    send_digest_mail(events, sys_metrics, mail_cfg)
+    # Réinitialiser le buffer
+    with open(DIGEST_BUFFER_FILE, "w") as f:
+        json.dump({"last_sent": datetime.now().isoformat(), "events": []}, f)
+    return True
+
+def send_digest_mail(events, sys_metrics, mail_cfg):
+    """Envoie un email digest regroupant tous les événements accumulés."""
+    now = datetime.now()
+    hostname = os.uname().nodename
+    n = len(events)
+    critiques = sum(1 for e in events if e.get("niveau") == "CRITIQUE")
+    avertissements = n - critiques
+    # Plage de temps couverte
+    try:
+        ts_start = events[-1]["ts"][:16].replace("T", " ")
+        ts_end   = events[0]["ts"][:16].replace("T", " ")
+    except Exception:
+        ts_start = ts_end = now.strftime("%d/%m %H:%M")
+
+    rows = ""
+    for e in events[:50]:
+        color = "#ef4444" if e.get("niveau") == "CRITIQUE" else "#f59e0b"
+        ts_short = e.get("ts", "")[:16].replace("T", " ")
+        rows += (
+            f"<tr><td style='padding:6px 8px;border:1px solid #334155;color:#64748b;font-size:11px'>{ts_short}</td>"
+            f"<td style='padding:6px 8px;border:1px solid #334155;color:{color};font-weight:bold;font-size:11px'>{e.get('niveau','')}</td>"
+            f"<td style='padding:6px 8px;border:1px solid #334155;font-size:12px'>{e.get('message','')}</td></tr>"
+        )
+    if n > 50:
+        rows += f"<tr><td colspan='3' style='padding:6px;text-align:center;color:#64748b;font-size:11px'>… et {n-50} autres événements</td></tr>"
+
+    interval_h = mail_cfg.get("mail_digest_hours", 4)
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#0f172a;font-family:'Segoe UI',sans-serif;color:#e2e8f0">
+<div style="max-width:680px;margin:0 auto;padding:24px">
+  <div style="background:#1a2744;border-left:4px solid #6366f1;border-radius:10px;padding:20px 24px;margin-bottom:20px">
+    <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.08em">DIGEST SOC — {hostname}</div>
+    <div style="font-size:22px;font-weight:800;color:#e2e8f0;margin:6px 0">📬 {n} événement(s) — {interval_h}h</div>
+    <div style="font-size:12px;color:#94a3b8">{ts_start} → {ts_end}</div>
+    <div style="display:flex;gap:16px;margin-top:12px">
+      <span style="background:#7f1d1d;color:#fca5a5;padding:3px 10px;border-radius:5px;font-size:12px">🚨 {critiques} critique(s)</span>
+      <span style="background:#78350f;color:#fde68a;padding:3px 10px;border-radius:5px;font-size:12px">⚠️ {avertissements} avertissement(s)</span>
+    </div>
+  </div>
+  <div style="background:#1e293b;border-radius:10px;overflow:hidden;margin-bottom:16px">
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr>
+        <th style="padding:8px;background:#0f172a;text-align:left;font-size:11px;color:#64748b;border:1px solid #334155">Heure</th>
+        <th style="padding:8px;background:#0f172a;text-align:left;font-size:11px;color:#64748b;border:1px solid #334155">Niveau</th>
+        <th style="padding:8px;background:#0f172a;text-align:left;font-size:11px;color:#64748b;border:1px solid #334155">Événement</th>
+      </tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+  </div>
+  <div style="text-align:center;font-size:10px;color:#334155">ViaDigiTech SOC IA — digest toutes les {interval_h}h · {now.strftime('%d/%m/%Y %H:%M')}</div>
+</div></body></html>"""
+
+    subject = f"[SOC Digest] {n} événement(s) sur {interval_h}h — {now.strftime('%d/%m %H:%M')}"
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["From"]    = MAIL_FROM
+        msg["To"]      = ", ".join(MAIL_TO)
+        msg["Subject"] = subject
+        msg.attach(MIMEText(html, "html", "utf-8"))
+        with smtplib.SMTP("localhost") as s:
+            s.sendmail(MAIL_FROM, MAIL_TO, msg.as_string())
+        print(f"[Digest] Mail digest envoyé : {n} événements sur {interval_h}h")
+    except Exception as e:
+        print(f"[Digest] Erreur envoi digest : {e}")
+
+# ─────────────────────────────────────────
 # ANALYSE IA — OLLAMA (alertes temps réel)
 # ─────────────────────────────────────────
 
@@ -724,6 +893,7 @@ def main():
     if alertes:
         # Filtre notif_level depuis soc_config.json
         notif_level = "all"
+        mail_cfg = load_mail_config()
         try:
             with open("/home/ubuntu/secops/soc_config.json") as _f:
                 notif_level = json.load(_f).get("notif_level", "all")
@@ -738,14 +908,33 @@ def main():
             alertes_to_send = alertes
 
         if alertes_to_send:
-            if is_report_running():
-                print(f"[{now:%H:%M:%S}] {len(alertes_to_send)} alerte(s) → report.py actif, analyse IA skippée (contention CPU)")
-                ai_analysis = None
+            # Vérifier les types d'alertes activés
+            alert_types = _alert_type(alertes_to_send, actions)
+            mail_enabled = is_mail_type_enabled(mail_cfg, alert_types)
+            mail_mode = mail_cfg.get("mail_mode", "immediate")
+
+            if not mail_enabled:
+                print(f"[{now:%H:%M:%S}] {len(alertes_to_send)} alerte(s) → type désactivé dans config mail")
+            elif mail_mode == "digest":
+                append_to_digest(alertes_to_send, actions, sys_metrics)
+                flushed = flush_digest_if_ready(mail_cfg, sys_metrics, ssh_fails, top_ips, new_bans)
+                if not flushed:
+                    buf_count = 0
+                    try:
+                        with open(DIGEST_BUFFER_FILE) as _bf:
+                            buf_count = len(json.load(_bf).get("events", []))
+                    except Exception:
+                        pass
+                    print(f"[{now:%H:%M:%S}] {len(alertes_to_send)} alerte(s) → mode digest, buffer={buf_count} événements")
             else:
-                print(f"[{now:%H:%M:%S}] {len(alertes_to_send)} alerte(s) → analyse IA + envoi mail...")
-                ai_analysis = ollama_alert_analysis(alertes_to_send, sys_metrics, ssh_fails, new_bans, actions)
-            send_alert(alertes_to_send, sys_metrics, ssh_fails, top_ips, new_bans, actions, ai_analysis)
-            print(f"[{now:%H:%M:%S}] Alerte envoyée à {MAIL_TO}")
+                if is_report_running():
+                    print(f"[{now:%H:%M:%S}] {len(alertes_to_send)} alerte(s) → report.py actif, analyse IA skippée (contention CPU)")
+                    ai_analysis = None
+                else:
+                    print(f"[{now:%H:%M:%S}] {len(alertes_to_send)} alerte(s) → analyse IA + envoi mail...")
+                    ai_analysis = ollama_alert_analysis(alertes_to_send, sys_metrics, ssh_fails, new_bans, actions)
+                send_alert(alertes_to_send, sys_metrics, ssh_fails, top_ips, new_bans, actions, ai_analysis)
+                print(f"[{now:%H:%M:%S}] Alerte envoyée à {MAIL_TO}")
         else:
             print(f"[{now:%H:%M:%S}] {len(alertes)} alerte(s) filtrée(s) (niveau: {notif_level})")
         # Telegram toujours sur les critiques, indépendamment du filtre mail
@@ -757,6 +946,10 @@ def main():
             msg_lines.append(f"CPU: {sys_metrics['cpu']:.1f}% | RAM: {sys_metrics['ram']:.1f}% | Disk: {sys_metrics['disk']:.1f}%")
             send_telegram("\n".join(msg_lines))
     else:
+        # En mode digest, vérifier si un flush est dû même sans nouvelles alertes
+        mail_cfg = load_mail_config()
+        if mail_cfg.get("mail_mode") == "digest":
+            flush_digest_if_ready(mail_cfg, sys_metrics, ssh_fails, top_ips, new_bans)
         print(f"[{now:%H:%M:%S}] Aucune alerte. CPU:{sys_metrics['cpu']:.1f}% RAM:{sys_metrics['ram']:.1f}% Disk:{sys_metrics['disk']:.1f}% SSH:{ssh_fails} Bans:{len(new_bans)}")
 
     check_subnet_auto_ban()
