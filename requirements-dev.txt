@@ -1,0 +1,5 @@
+# Test/dev dependencies for scripts/dashboard.py (see tests/).
+# psutil is also a runtime import of dashboard.py itself (used for live CPU/RAM/disk
+# metrics) but was never pinned anywhere in the project before this file.
+pytest>=9.1
+psutil>=7.2

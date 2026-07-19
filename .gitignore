@@ -8,6 +8,7 @@ logs/
 venv/
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Secrets / configuration locale
 .env
