@@ -206,5 +206,77 @@ def db_get_stats(hours=24):
     }
 
 
+# ─────────────────────────────────────────
+# THREAT PATTERNS
+# ─────────────────────────────────────────
+
+_BAN_ACTIONS = {"BAN_AUTO", "BAN_OLLAMA", "BAN_TEMP", "BAN_GEO"}
+
+
+def db_update_threat_pattern(ip, action, score):
+    """Upsert threat pattern (IP individuelle ou subnet /24) dans SQLite."""
+    is_subnet = 1 if "/" in ip else 0
+    now_date = datetime.now().isoformat()[:10]
+    now_ts   = datetime.now().isoformat()[:16]
+    is_ban   = action in _BAN_ACTIONS
+
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT bans, score_max, extra FROM threat_patterns WHERE ip=?", (ip,)
+        ).fetchone()
+        if row:
+            extra        = json.loads(row["extra"] or "{}")
+            new_bans     = row["bans"] + (1 if is_ban else 0)
+            new_score    = max(row["score_max"] or 0, score)
+            if not is_subnet:
+                acts = extra.get("actions", [])
+                acts.append({"ts": now_ts, "action": action})
+                extra["actions"] = acts[-10:]
+            conn.execute(
+                "UPDATE threat_patterns SET bans=?, score_max=?, extra=? WHERE ip=?",
+                (new_bans, new_score, json.dumps(extra), ip),
+            )
+        else:
+            extra = {} if is_subnet else {"actions": [{"ts": now_ts, "action": action}]}
+            conn.execute(
+                "INSERT INTO threat_patterns(ip,first_seen,bans,score_max,is_subnet,extra) "
+                "VALUES(?,?,?,?,?,?)",
+                (ip, now_date, int(is_ban), score, is_subnet, json.dumps(extra)),
+            )
+
+
+def db_get_threat_pattern(ip):
+    """Retourne le profil complet d'une IP depuis SQLite (avec subnet_info)."""
+    subnet = ".".join(ip.split(".")[:3]) + ".0/24" if "/" not in ip else None
+
+    with get_conn() as conn:
+        row        = conn.execute("SELECT * FROM threat_patterns WHERE ip=?", (ip,)).fetchone()
+        subnet_row = conn.execute("SELECT * FROM threat_patterns WHERE ip=?", (subnet,)).fetchone() if subnet else None
+
+    if not row:
+        return {}
+
+    result = json.loads(row["extra"] or "{}")
+    result.update({"first_seen": row["first_seen"], "bans": row["bans"], "score_max": row["score_max"]})
+
+    if subnet_row:
+        sub = json.loads(subnet_row["extra"] or "{}")
+        sub.update({"first_seen": subnet_row["first_seen"], "bans": subnet_row["bans"]})
+        result["subnet_info"] = sub
+
+    return result
+
+
+def db_purge_old_patterns(days=90):
+    """Supprime les IPs inactives depuis plus de N jours."""
+    from datetime import timedelta
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()[:10]
+    with get_conn() as conn:
+        deleted = conn.execute(
+            "DELETE FROM threat_patterns WHERE first_seen < ? AND bans = 0", (cutoff,)
+        ).rowcount
+    return deleted
+
+
 # Initialisation au chargement du module
 init_db()

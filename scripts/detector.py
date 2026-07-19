@@ -33,13 +33,14 @@ except ImportError:
 
 # F17 — SQLite
 try:
-    from soc_db import db_write_audit, db_add_score_history, db_get_stats
+    from soc_db import db_write_audit, db_add_score_history, db_get_stats, db_update_threat_pattern
     DB_AVAILABLE = True
 except ImportError:
     DB_AVAILABLE = False
     def db_write_audit(ip, action, score, reason=""): pass
     def db_add_score_history(ip, score, action=""): pass
     def db_get_stats(hours=24): return {"avg_score": 0}
+    def db_update_threat_pattern(ip, action, score): pass
 
 # ─────────────────────────────────────────
 # CONFIG
@@ -304,15 +305,19 @@ def update_threat_patterns(ip, action, score):
     patterns[ip]["score_history"] = patterns[ip]["score_history"][-30:]
     if DB_AVAILABLE:
         db_add_score_history(ip, score, action)
+        db_update_threat_pattern(ip, action, score)
 
     # Entrée par /24
     if subnet not in patterns:
         patterns[subnet] = {"first_seen": datetime.now().isoformat()[:10], "bans": 0, "ips": []}
-    if action in ("BAN_AUTO", "BAN_OLLAMA"):
+    if action in ("BAN_AUTO", "BAN_OLLAMA", "BAN_TEMP", "BAN_GEO"):
         patterns[subnet]["bans"] += 1
     if ip not in patterns[subnet]["ips"]:
         patterns[subnet]["ips"].append(ip)
     patterns[subnet]["ips"] = patterns[subnet]["ips"][-20:]
+
+    if DB_AVAILABLE:
+        db_update_threat_pattern(subnet, action, 0)
 
     try:
         with open(THREAT_PATTERNS_FILE, "w") as f:

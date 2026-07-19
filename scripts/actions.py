@@ -19,10 +19,11 @@ from functools import wraps
 import sys
 sys.path.insert(0, os.path.dirname(__file__))
 try:
-    from soc_db import db_get_score_history, db_get_audit
+    from soc_db import db_get_score_history, db_get_audit, db_get_threat_pattern
     DB_AVAILABLE = True
 except ImportError:
     DB_AVAILABLE = False
+    def db_get_threat_pattern(ip): return {}
 try:
     from flask_limiter import Limiter
     from flask_limiter.util import get_remote_address
@@ -814,18 +815,19 @@ def threat_ip():
 
     score_history = db_get_score_history(ip, limit=30) if DB_AVAILABLE else []
 
-    # Profil depuis threat_patterns.json (toujours disponible)
-    profile = {}
-    tp_file = "/home/ubuntu/secops/threat_patterns.json"
-    if os.path.exists(tp_file):
-        try:
-            with open(tp_file) as f:
-                patterns = json.load(f)
-            profile = patterns.get(ip, {})
-            subnet = ".".join(ip.split(".")[:3]) + ".0/24"
-            profile["subnet_info"] = patterns.get(subnet, {})
-        except Exception:
-            pass
+    # Profil depuis SQLite (avec fallback JSON)
+    profile = db_get_threat_pattern(ip) if DB_AVAILABLE else {}
+    if not profile:
+        tp_file = "/home/ubuntu/secops/threat_patterns.json"
+        if os.path.exists(tp_file):
+            try:
+                with open(tp_file) as f:
+                    patterns = json.load(f)
+                profile = patterns.get(ip, {})
+                subnet = ".".join(ip.split(".")[:3]) + ".0/24"
+                profile["subnet_info"] = patterns.get(subnet, {})
+            except Exception:
+                pass
 
     # Dernières actions audit
     audit = db_get_audit(ip=ip, limit=20) if DB_AVAILABLE else []
